@@ -1,0 +1,62 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>M1 · buy</title><style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%;overflow:hidden;background:#04141f}canvas{display:block;width:390px;height:844px;touch-action:none}</style></head><body><script>window.requestAnimationFrame = function (cb) { return setTimeout(function () { cb(performance.now()); }, 16); };</script><script>
+(function () {
+  var cv = null;
+  window.wx = {
+    getWindowInfo: function () {
+      /* 固定成真机竖屏尺寸：headless 的 --window-size 会被浏览器改写，
+       * 只有把视口写死，截图才和微信里看到的布局一致 */
+      return { windowWidth: 390, windowHeight: 844, pixelRatio: 2,
+        statusBarHeight: 20, safeArea: { top: 20, bottom: 810, left: 0, right: 390 } };
+    },
+    createCanvas: function () { if (!cv) { cv = document.createElement('canvas'); document.body.appendChild(cv); } return cv; },
+    getStorageSync: function (k) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : ''; } catch (e) { return ''; } },
+    setStorageSync: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+    removeStorageSync: function (k) { try { localStorage.removeItem(k); } catch (e) {} },
+    onTouchStart: function (cb) {
+      window.__previewTap = function (x, y) { cb({ touches: [{ clientX: x, clientY: y }] }); };
+      /* 多指：用来触发三指点屏的诊断条 */
+      window.__previewTouch = function (n) {
+        var arr = [];
+        for (var i = 0; i < n; i++) arr.push({ clientX: 60 + i * 40, clientY: 400 });
+        cb({ touches: arr });
+      };
+    },
+    onShow: function () {}, onHide: function () {}
+  };
+  window.addEventListener('pointerdown', function (e) { if (window.__previewTap) window.__previewTap(e.clientX, e.clientY); }, { passive: true });
+})();
+</script><script>localStorage.setItem('aquarium_save', JSON.stringify({"v":4,"savedAt":Date.now(),"lastSeenAt":Date.now(),"t":0,"coins":{"fish":4000,"s":0},"acc":0,"foodLv":1,"auto":false,"corals":0,"storageLv":1,"stats":{"earned_fish":0,"earned_s":0,"spent_fish":0,"spent_s":0,"feedCount":0,"playSeconds":0},"fish":[{"id":"f1","sp":"gold_fish","g":70,"h":96,"m":96,"tr":[],"b":0}]}));</script><script src="../../preview.bundle.js"></script><script>
+  /* 与 shim 的 getWindowInfo 保持一致：headless 的真实视口不是 390x844，
+   * 但游戏按 390x844 布局，所以这里也写死 */
+  var W = 390, H = 844;
+  var SB = 20, TOP = SB + 10;
+  /* 底部安全区 = 844 - 810 = 34，按钮贴在上方 */
+  var SAFE_BOTTOM = 34, BTN_H = 74;
+  /* M4：按钮落在缸底以下的底座里，位置与 render/canvas.js 一致 */
+  var BTN_Y = H - SAFE_BOTTOM - 10 - BTN_H;
+
+  /* 条目数要和 config/items.js 一致（M2 加到 6 条：多了「新鱼缸」） */
+  /* 道具页 5 条（M3 去掉了「新成员」盲盒）；卵页三档竖排 */
+  var ITEM_H = 70, ITEM_GAP = 9, ITEM_TOP = 92, ITEM_N = 5;
+  var EGG_ROWS = 3, EGG_H = 104, EGG_GAP = 10, EGG_TOP = 92;
+  var ITEMS_BOTTOM = ITEM_TOP + ITEM_N * (ITEM_H + ITEM_GAP) - ITEM_GAP;
+  var EGGS_BOTTOM = EGG_TOP + EGG_ROWS * (EGG_H + EGG_GAP) - EGG_GAP;
+  var SHEET_H = Math.min(H * 0.9, Math.max(ITEMS_BOTTOM, EGGS_BOTTOM) + 72);
+  var ST = H - SHEET_H;              /* 面板顶部 */
+  var EGG_W = W - 32;
+
+  function tap(x, y) { if (window.__previewTap) window.__previewTap(x, y); }
+  /* 三个按钮平分（见 ui/layout.js）：撒食 / 卖掉 / 商店 */
+  var BTN_W = 108, BTN_GAP = 10, BTN_X0 = (W - (BTN_W * 3 + BTN_GAP * 2)) / 2;
+  function tapShop() { tap(BTN_X0 + (BTN_W + BTN_GAP) * 2 + BTN_W / 2, BTN_Y + 37); }
+  function tapTab(i) { tap(18 + i * 92 + 42, ST + 52 + 15); }
+  function tapBuy(i) { tap(W - 104 + 39, ST + ITEM_TOP + i * (ITEM_H + ITEM_GAP) + 16 + 19); }
+  function tapEgg(i) {
+    tap(W / 2, ST + EGG_TOP + i * (EGG_H + EGG_GAP) + EGG_H / 2);
+  }
+  function tapFeed() { tap(BTN_X0 + BTN_W / 2, BTN_Y + 37); }
+
+      setTimeout(function () { tapShop(); }, 400);
+      setTimeout(function () { tapBuy(0); }, 900);
+      setTimeout(function () { tapBuy(1); }, 1300);
+    </script></body></html>

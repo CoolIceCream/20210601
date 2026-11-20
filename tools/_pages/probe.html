@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>probe</title>
+<style>*{margin:0;padding:0}html,body{height:100%;overflow:hidden;background:#04141f}
+canvas{display:block;width:100vw;height:100vh}</style></head><body>
+<script>window.requestAnimationFrame=function(cb){return setTimeout(function(){cb(performance.now());},16);};</script>
+<script>
+(function () {
+  var cv = null;
+  window.wx = {
+    getWindowInfo: function () {
+      var w = window.innerWidth, h = window.innerHeight;
+      return { windowWidth: w, windowHeight: h, pixelRatio: Math.min(window.devicePixelRatio || 1, 3),
+        statusBarHeight: 20, safeArea: { top: 20, bottom: h, left: 0, right: w } };
+    },
+    createCanvas: function () { if (!cv) { cv = document.createElement('canvas'); document.body.appendChild(cv); } return cv; },
+    getStorageSync: function (k) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : ''; } catch (e) { return ''; } },
+    setStorageSync: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+    removeStorageSync: function (k) { try { localStorage.removeItem(k); } catch (e) {} },
+    onTouchStart: function (cb) { window.__previewTap = function (x, y) { cb({ touches: [{ clientX: x, clientY: y }] }); }; },
+    onShow: function () {}, onHide: function () {}
+  };
+  localStorage.clear();
+})();
+</script>
+<script src="../../preview.bundle.js"></script>
+<script>
+setTimeout(function () { window.__previewTap(240, window.innerHeight - 48); }, 400);
+setTimeout(function () {
+  var c = document.querySelector('canvas');
+  var ctx = c.getContext('2d');
+  var dpr = c.width / c.clientWidth;
+  function px(x, y) {
+    var d = ctx.getImageData(Math.round(x * dpr), Math.round(y * dpr), 1, 1).data;
+    return d[0] + '/' + d[1] + '/' + d[2] + '/' + d[3];
+  }
+  var out = [
+    'inner=' + window.innerWidth + 'x' + window.innerHeight,
+    'canvas=' + c.width + 'x' + c.height,
+    'client=' + c.clientWidth + 'x' + c.clientHeight,
+    'dpr=' + dpr,
+    'buyArea=' + px(325, 322)
+  ].join(' | ');
+  document.body.setAttribute('data-probe', out);
+}, 1800);
+</script>
+</body></html>

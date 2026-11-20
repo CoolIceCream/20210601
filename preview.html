@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>我的水族箱 · 小游戏画面预览</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#04141f}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none}
+</style>
+</head>
+<body>
+<script>
+/* 在浏览器里模拟小游戏运行环境，跑的是同一份源码（打包版） */
+(function () {
+  var cv = null;
+
+  window.wx = {
+    getWindowInfo: function () {
+      var w = window.innerWidth;
+      var h = window.innerHeight;
+      return {
+        windowWidth: w,
+        windowHeight: h,
+        pixelRatio: Math.min(window.devicePixelRatio || 1, 3),
+        statusBarHeight: 20,
+        safeArea: { top: 20, bottom: h, left: 0, right: w }
+      };
+    },
+    createCanvas: function () {
+      if (!cv) {
+        cv = document.createElement('canvas');
+        document.body.appendChild(cv);
+      }
+      return cv;
+    },
+    getStorageSync: function (k) {
+      try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : ''; } catch (e) { return ''; }
+    },
+    setStorageSync: function (k, v) {
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+    },
+    removeStorageSync: function (k) {
+      try { localStorage.removeItem(k); } catch (e) {}
+    },
+    /* 小游戏的 wx.onTouchStart：这里桥接到浏览器的 pointerdown */
+    onTouchStart: function (cb) {
+      window.__previewTap = function (x, y) {
+        cb({ touches: [{ clientX: x, clientY: y }] });
+      };
+    },
+    onShow: function () {},
+    onHide: function () {}
+  };
+
+  window.addEventListener('pointerdown', function (e) {
+    if (window.__previewTap) window.__previewTap(e.clientX, e.clientY);
+  }, { passive: true });
+})();
+</script>
+<script src="preview.bundle.js"></script>
+</body>
+</html>

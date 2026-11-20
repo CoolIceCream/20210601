@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#d9b57e">
+<meta name="format-detection" content="telephone=no">
+<title>我的水族箱</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    position: fixed; inset: 0;
+    background: radial-gradient(120% 90% at 50% 0%, #25414f 0%, #14252e 45%, #0a141a 100%);
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+
+  /* 舞台：游戏画面的逻辑尺寸。
+   * 底色和游戏里缸体外的木色完全一致 —— 手机上地址栏收起时
+   * 等比缩放会留出几像素空白，同色才看不出接缝。 */
+  #stage {
+    position: absolute; left: 50%; top: 50%;
+    transform-origin: center center;
+    overflow: hidden;
+    background: linear-gradient(#d9b57e, #bd9159);
+  }
+
+  /* 桌面：给舞台一圈阴影，像把手机放在桌上；手机铺满就不要。 */
+  body.desk #stage {
+    border-radius: 16px;
+    box-shadow: 0 26px 70px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .1);
+  }
+
+  /* 手机上地址栏收起/展开会让舞台等比缩放一点点。
+   * 露出来的部分用同一种木色，才看不出接缝。 */
+  body.phone { background: linear-gradient(#d9b57e, #bd9159); }
+
+  /* 手机横屏：这块是竖屏游戏，与其缩成一条不如直接提示转过来 */
+  #rotate {
+    position: fixed; inset: 0; z-index: 9;
+    display: none; align-items: center; justify-content: center;
+    background: #12232c;
+    color: #ffd08a;
+    padding: 0 40px;
+    text-align: center;
+    font: 600 15px/1.9 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  body.tilt #rotate { display: flex; }
+  body.tilt #stage { visibility: hidden; }
+
+  #stage > canvas { display: block; }
+
+  /* 截图模式（?stage=WxH）：左上角对齐、无圆角，便于逐像素核对 */
+  body.shot #stage {
+    left: 0; top: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  #fallback {
+    position: absolute; left: 0; right: 0; top: 38%;
+    padding: 0 28px;
+    text-align: center; white-space: pre-wrap;
+    color: #ffd08a;
+    font: 600 14px/1.8 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: none;
+  }
+</style>
+</head>
+<body class="desk">
+<div id="stage"></div>
+<div id="fallback"></div>
+<div id="rotate">这是竖屏游戏<br>请把手机转回来</div>
+
+<script>
+/* 容器页：决定「舞台」多大。
+ * 手机竖屏 → 舞台 = 屏幕，一屏铺满；
+ * 桌面 / 横屏 → 舞台固定 390×844（和微信里看到的排版逐像素一致），
+ *               再用 transform 整体缩放塞进窗口。 */
+(function () {
+  var vw = window.innerWidth;
+  var vh = window.innerHeight;
+
+  /* 调试通道：?stage=390x844 强制一个逻辑尺寸并左上角对齐。
+   * 无头浏览器报的 innerWidth 和 --window-size 经常对不上，
+   * 有了它截图才能逐像素核对排版。真实用户不会带这个参数。 */
+  var q = /[?&]stage=(\d+)x(\d+)/.exec(location.search);
+  var forced = q ? { w: parseInt(q[1], 10), h: parseInt(q[2], 10) } : null;
+
+  var phone;
+  var W, H;
+
+  if (forced) {
+    phone = true;
+    W = forced.w;
+    H = forced.h;
+    document.body.className = 'shot';
+  } else {
+    phone = vw <= 560 && vh > vw;
+    W = phone ? vw : 390;
+    H = phone ? vh : 844;
+    document.body.className = phone ? 'phone' : 'desk';
+  }
+
+  /* platform.viewport() 会优先读这个值：
+   * 布局按逻辑尺寸算，缩放到多大都不影响游戏内部排版。 */
+  window.__stageSize = { w: W, h: H };
+
+  var stage = document.getElementById('stage');
+  stage.style.width = W + 'px';
+  stage.style.height = H + 'px';
+
+  function fit() {
+    if (forced) {
+      stage.style.transform = 'none';
+      return;
+    }
+
+    /* 横屏手机：竖屏游戏缩小了没法玩，直接改成提示转屏 */
+    var tilt = window.innerWidth > window.innerHeight && window.innerHeight < 560;
+    document.body.classList.toggle('tilt', tilt);
+    if (tilt) return;
+
+    var k = Math.min(window.innerWidth / W, window.innerHeight / H);
+    /* 桌面上放大到 1.2 倍就到顶：再大就显得粗糙了 */
+    if (!phone) k = Math.min(k, 1.2);
+    if (!(k > 0)) k = 1;
+    stage.style.transform = 'translate(-50%, -50%) scale(' + k + ')';
+  }
+
+  window.__fitStage = fit;
+
+  var pending = 0;
+  function later() {
+    if (pending) clearTimeout(pending);
+    pending = setTimeout(fit, 80);
+  }
+
+  window.addEventListener('resize', later);
+  window.addEventListener('orientationchange', function () { setTimeout(fit, 320); });
+  /* 手机上地址栏收起/展开会改变可视高度，缩放要跟着走 */
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', later);
+
+  fit();
+})();
+</script>
+
+<script>__BUNDLE__</script>
+
+<script>
+/* 画布是游戏自己创建的，所以要等它挂上来之后再量一次尺寸 */
+(function () {
+  function again() { if (window.__fitStage) window.__fitStage(); }
+  requestAnimationFrame(again);
+  setTimeout(again, 60);
+  setTimeout(again, 400);
+
+  /* 调试通道：?tap=195,774 在加载后点一下这个**逻辑坐标**。
+   * 用来验证缩放后的触摸换算有没有偏 —— 手机上点不到的地方，
+   * 自动化也没法点，只能靠它。 */
+  var tm = /[?&]tap=([^&]+)/.exec(location.search);
+  if (tm) {
+    /* 支持 ?tap=x,y 与 ?tap=x,y;x2,y2 —— 后者用来验证「选中→卖掉」这类两步操作 */
+    var pairs = decodeURIComponent(tm[1]).split(';');
+    for (var pi = 0; pi < pairs.length; pi++) {
+      var xy = /^(\d+),(\d+)$/.exec(pairs[pi].trim());
+      if (!xy) continue;
+      (function (px, py, delay) {
+        setTimeout(function () {
+          var cv = document.querySelector('#stage canvas');
+          var st = window.__stageSize;
+          if (!cv || !st) return;
+          var r = cv.getBoundingClientRect();
+          var sx = r.left + px * (r.width / st.w);
+          var sy = r.top + py * (r.height / st.h);
+          var E = window.PointerEvent ? PointerEvent : MouseEvent;
+          var opt = {
+            clientX: sx, clientY: sy, bubbles: true, cancelable: true, pointerId: 7
+          };
+          cv.dispatchEvent(new E('pointerdown', opt));
+          /* 真正的点击现在在抬手时分发（按下要先判断是不是拖动），
+           * 只发 pointerdown 会被当成「还没决定」而不触发。 */
+          cv.dispatchEvent(new E('pointerup', opt));
+        }, delay);
+      })(+xy[1], +xy[2], 900 + pi * 1400);
+    }
+  }
+
+  /* 兜底：两秒后还没有画布，说明启动链断了，别让用户对着空屏 */
+  setTimeout(function () {
+    if (document.querySelector('#stage canvas')) return;
+    var fb = document.getElementById('fallback');
+    fb.style.display = 'block';
+    fb.textContent = '启动失败：画布没有创建出来\n请换一个浏览器或重新打开本页';
+  }, 2000);
+})();
+
+window.addEventListener('error', function (e) {
+  if (document.querySelector('#stage canvas')) return;   /* 已经跑起来了就不打扰 */
+  var fb = document.getElementById('fallback');
+  fb.style.display = 'block';
+  fb.textContent = '启动失败：' + (e && e.message ? e.message : '未知错误');
+});
+</script>
+</body>
+</html>

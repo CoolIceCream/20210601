@@ -1,0 +1,26 @@
+{
+  "description": "我的水族箱 - 微信小游戏",
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "tools" },
+      { "type": "folder", "value": ".shots" },
+      { "type": "folder", "value": ".tmp" },
+      { "type": "folder", "value": "web" },
+      { "type": "folder", "value": "_backup" },
+      { "type": "file", "value": "preview.html" },
+      { "type": "file", "value": "preview.bundle.js" },
+      { "type": "file", "value": "fish-sheet.bundle.js" },
+      { "type": "file", "value": "qrcode.png" }
+    ],
+    "include": []
+  },
+  "setting": {
+    "es6": true,
+    "minified": true,
+    "postcss": false,
+    "urlCheck": true
+  },
+  "compileType": "game",
+  "appid": "wx5cb3a4d0c6198f1d",
+  "projectname": "aquarium-wechat-game"
+}
