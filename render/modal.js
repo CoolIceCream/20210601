@@ -56,20 +56,20 @@ function draw(ctx, modal) {
     if (!modal) return;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(58,38,18,0.5)';
+    ctx.fillStyle = 'rgba(6,10,24,0.68)';
     ctx.fillRect(0, 0, W, H);
 
     var c = cardRect(modal);
 
-    /* 卡片：奶油纸板 + 木色描边 + 柔和投影 */
+    /* 卡片：深墨牌匾 + 描金边 + 柔和投影 */
     ctx.save();
-    ctx.shadowColor = 'rgba(80,50,20,0.45)';
+    ctx.shadowColor = 'rgba(4,8,20,0.7)';
     ctx.shadowBlur = 22;
     ctx.shadowOffsetY = 8;
     roundRect(ctx, c.x, c.y, c.w, c.h, 24);
     var g = ctx.createLinearGradient(0, c.y, 0, c.y + c.h);
-    U.stop(g, 0, '#fffdf6');
-    U.stop(g, 1, '#ffeed0');
+    U.stop(g, 0, TT.cardTop);
+    U.stop(g, 1, TT.cardBottom);
     ctx.fillStyle = g;
     ctx.fill();
     ctx.restore();
@@ -97,11 +97,11 @@ function draw(ctx, modal) {
     ctx.lineJoin = 'round';
     ctx.font = '800 42px sans-serif';
     ctx.lineWidth = 7;
-    ctx.strokeStyle = 'rgba(140,88,20,0.85)';
+    ctx.strokeStyle = 'rgba(6,10,24,0.9)';
     ctx.strokeText(big, W / 2, c.y + 112);
     var gg = ctx.createLinearGradient(0, c.y + 86, 0, c.y + 134);
-    U.stop(gg, 0, '#fff3a8');
-    U.stop(gg, 1, '#f2a41a');
+    U.stop(gg, 0, '#f0d99a');
+    U.stop(gg, 1, '#c8a45c');
     ctx.fillStyle = gg;
     ctx.fillText(big, W / 2, c.y + 112);
 
@@ -125,19 +125,19 @@ function draw(ctx, modal) {
 
     ctx.font = '600 11.5px sans-serif';
     for (var i = 0; i < notes.length && i < 2; i++) {
-        ctx.fillStyle = modal.eaten > 0 && i === 0 ? '#c8441c'
-            : (modal.gain > 0 ? '#d98a2f' : TT.textSoft);
+        ctx.fillStyle = modal.eaten > 0 && i === 0 ? '#e06a55'
+            : (modal.gain > 0 ? '#e0bb6a' : TT.textSoft);
         ctx.fillText(notes[i], W / 2, c.y + 194 + i * 17);
     }
 
     /* 收下按钮 */
     var b = btnRect(modal);
     Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-        top: TT.greenTop, bottom: TT.greenBottom, deep: TT.greenDeep,
-        r: 24, depth: 5, ink: '#2f7a25', lw: 2.8
+        top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
+        r: 24, depth: 5, ink: '#5f1e18', lw: 2.8
     });
     ctx.lineJoin = 'round';
-    Th.textOutlined(ctx, '知道了', b.x + b.w / 2, b.y + b.h / 2, 17, '#ffffff', '#2b6b20', 3.2);
+    Th.textOutlined(ctx, '知道了', b.x + b.w / 2, b.y + b.h / 2, 17, '#fff3d2', '#5f1e18', 3.2);
 
     ctx.restore();
 }

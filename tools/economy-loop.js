@@ -127,7 +127,7 @@ for (var i = 0; i < TOTAL; i++) {
 function snapshot(sec) {
     var bal = wallet.display(state, 'fish');
     var value = 0;
-    for (var i = 0; i < state.fish.length; i++) value += require('../core/fish.js').sellPriceOf(state.fish[i]);
+    for (var i = 0; i < state.fish.length; i++) value += require('../core/fish.js').sellPriceOf(state.fish[i], state.shellLv);
     return {
         t: sec,
         fish: state.fish.length,

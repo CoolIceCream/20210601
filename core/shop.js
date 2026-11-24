@@ -22,6 +22,7 @@ var cfg = require('../config/index.js');
 var wallet = require('./wallet.js');
 var fishLib = require('./fish.js');
 var storage = require('./storage.js');
+var codex = require('./codex.js');
 
 function itemById(id) {
     for (var i = 0; i < cfg.items.length; i++) {
@@ -33,6 +34,8 @@ function itemById(id) {
 /* 当前等级（只有带 maxLevel 的条目才有意义） */
 function levelOf(state, id) {
     if (id === 'feed') return state.foodLv;
+    if (id === 'bait') return Math.max(0, (state.bag && state.bag.bait) || 0);
+    if (id === 'shell') return state.shellLv || 0;
     if (id === 'warehouse') return storage.levelOf(state);
     if (id === 'tank') return storage.tankCountOf(state);
     return 0;
@@ -41,6 +44,10 @@ function levelOf(state, id) {
 /* 已购次数，用来算价格和判断满级 */
 function purchaseCount(state, id) {
     if (id === 'feed') return Math.max(0, state.foodLv - 1);
+    /* 消耗品价格恒定：不走 base×mul^n 的涨价格 */
+    if (id === 'bait') return 0;
+    /* 贝壳从 0 级起买：已购次数 = 当前等级（0→1 花 base，1→2 花 base×mul） */
+    if (id === 'shell') return Math.max(0, state.shellLv || 0);
     if (id === 'coral') return state.corals;
     if (id === 'auto') return state.auto ? 1 : 0;
     if (id === 'warehouse') return Math.max(0, storage.levelOf(state) - 1);
@@ -84,6 +91,16 @@ function statusOf(state, item) {
     else label = price >= 10000 ? wallet.format(price) : String(price);
 
     var desc = item.desc;
+    if (item.id === 'bait') {
+        desc = cur > 0 ? ('钓鱼必备 · 现有 ' + cur + ' 个') : '钓鱼必备 · 每次消耗 1 个';
+    }
+    if (item.id === 'shell') {
+        var gains = cfg.economy.sell.shellBonus || [1];
+        function pct(v) { return Math.round((v - 1) * 100) + '%'; }
+        desc = cur > 0 ? ('当前卖鱼 +' + pct(gains[Math.min(cur, gains.length - 1)])) : item.desc;
+        if (maxed) desc = '卖鱼价 +' + pct(gains[gains.length - 1]) + ' · 已满级';
+        else if (cur > 0) desc += ' → 下一级 +' + pct(gains[Math.min(cur + 1, gains.length - 1)]);
+    }
     if (item.id === 'feed' && maxed) desc = '已经是最高等级';
     if (item.id === 'auto' && owned) desc = '运行中：每 ' + cfg.economy.autoFeeder.interval + ' 秒撒一次食';
     if (item.id === 'tank') {
@@ -112,6 +129,10 @@ function statusOf(state, item) {
 
     var level = '';
     if (item.id === 'feed') level = maxed ? 'MAX' : 'Lv.' + state.foodLv;
+    if (item.id === 'bait') level = '×' + cur;
+    if (item.id === 'shell') {
+        level = maxed ? 'MAX' : 'Lv.' + cur + '/' + item.maxLevel;
+    }
     if (item.id === 'warehouse') {
         level = (maxed ? 'MAX' : 'Lv.' + storage.levelOf(state) + '/' + storage.maxLevel()) +
             ' · ' + storage.offlineHoursOf(state) + 'h';
@@ -162,8 +183,12 @@ function buy(state, id) {
         state.tankCount = Math.min(storage.maxTanks(), storage.tankCountOf(state) + 1);
         /* 开缸后把视图切过去：让玩家立刻看到空缸，而不是以为买了个寂寞 */
         state.activeTank = state.tankCount - 1;
+    } else if (id === 'bait') {
+        state.bag.bait = Math.max(0, (state.bag.bait || 0)) + 1;
     } else if (id === 'feed') {
         state.foodLv = Math.min(item.maxLevel, state.foodLv + 1);
+    } else if (id === 'shell') {
+        state.shellLv = Math.min(item.maxLevel, (state.shellLv || 0) + 1);
     } else if (id === 'coral') {
         state.corals += 1;
     } else if (id === 'auto') {
@@ -394,6 +419,7 @@ function buyEgg(state, rarity) {
 
     var sp = rollInRarity(rarity);
     state.fish.push(fishLib.create(sp.id, { growth: 2, rollTraits: true, tank: slot }));
+    codex.mark(state, sp.id);   /* 图鉴收录：卖掉后仍算发现过 */
     return { ok: true, reason: '', species: sp, rarity: rarity, price: st.price, tank: slot };
 }
 
@@ -412,7 +438,7 @@ function sellFish(state, fishId) {
 
     var f = state.fish[idx];
     var sp = fishLib.speciesById(f.speciesId);
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
 
     state.fish.splice(idx, 1);
     wallet.add(state, 'fish', price, 'sell:' + sp.id);
@@ -423,13 +449,14 @@ function sellFish(state, fishId) {
 function sellableOf(state) {
     var out = [];
     for (var i = 0; i < state.fish.length; i++) {
-        out.push({ fish: state.fish[i], price: fishLib.sellPriceOf(state.fish[i]) });
+        out.push({ fish: state.fish[i], price: fishLib.sellPriceOf(state.fish[i], state.shellLv) });
     }
     return out;
 }
 
 module.exports = {
     itemById: itemById,
+    levelOf: levelOf,
     priceOf: priceOf,
     statusOf: statusOf,
     list: list,

@@ -16,6 +16,7 @@ var platform = require('../platform.js');
 var fishFactory = require('./fish.js');
 var stateModule = require('./state.js');
 var storage = require('./storage.js');
+var codex = require('./codex.js');
 
 var KEY = 'aquarium_save';
 var LEGACY_V2_KEY = 'aquarium_save_v2';
@@ -35,12 +36,35 @@ function serialize(state) {
         },
         acc: state.acc.fish,
         foodLv: state.foodLv,
+        shellLv: state.shellLv || 0,
         auto: !!state.auto,
         corals: state.corals,
         storageLv: state.storageLv,
         tankCount: state.tankCount,
         activeTank: state.activeTank,
         stats: state.stats,
+        discovered: codex.table(state),
+
+        /* M9 鱼塘 / 仓库 */
+        pondLv: state.pondLv || 1,
+        bag: {
+            bait: (state.bag && state.bag.bait) || 0,
+            oyster: (state.bag && state.bag.oyster) || 0,
+            pearl: (state.bag && state.bag.pearl) || 0
+        },
+        /* 仓库里的鱼还没进缸，不存坐标，放进去时由 ensurePlacement 兜底 */
+        caught: (state.caught || []).map(function (f) {
+            return {
+                id: f.id,
+                sp: f.speciesId,
+                g: f.growth,
+                h: f.hunger,
+                m: f.mood,
+                tr: f.traits || [],
+                b: f.bornAt || 0
+            };
+        }),
+
         fish: state.fish.map(function (f) {
             return {
                 id: f.id,
@@ -73,6 +97,9 @@ function deserializeV2(raw) {
     s.coins.s = Number(raw.coins && raw.coins.s) || 0;
     s.acc.fish = Number(raw.acc) || 0;
     s.foodLv = Math.max(1, Math.min(5, raw.foodLv || 1));
+    /* 招财贝壳：老档没有这个字段，读成 0 就等于没买过 */
+    var maxShell = (cfg.economy.sell.shellBonus || [1]).length - 1;
+    s.shellLv = Math.max(0, Math.min(maxShell, Math.floor(raw.shellLv || 0)));
     s.auto = !!raw.auto;
     s.corals = Math.max(0, raw.corals || 0);
     /* v2 没有这个字段，补默认值就等于完成迁移 */
@@ -106,6 +133,34 @@ function deserializeV2(raw) {
             y: it.y || 0
         }));
     }
+    /* 图鉴：新档读 discovered；老档没有则从现有鱼补录 */
+    if (raw.discovered && typeof raw.discovered === 'object') {
+        s.discovered = raw.discovered;
+    }
+    codex.syncFromFish(s);
+
+    /* M9 鱼塘 / 仓库：老档没有这些字段，补默认值就等于迁移 */
+    var pondMax = Math.max(1, cfg.pond.openMax || 1);
+    s.pondLv = Math.max(1, Math.min(pondMax, Math.floor(raw.pondLv || 1)));
+    var rawBag = raw.bag || {};
+    s.bag = {
+        bait: Math.max(0, Math.floor(rawBag.bait || 0)),
+        oyster: Math.max(0, Math.floor(rawBag.oyster || 0)),
+        pearl: Math.max(0, Math.floor(rawBag.pearl || 0))
+    };
+    var caughtList = raw.caught || [];
+    for (var ci = 0; ci < caughtList.length; ci++) {
+        var cf = caughtList[ci];
+        s.caught.push(fishFactory.create(cf.sp, {
+            id: cf.id,
+            growth: cf.g,
+            hunger: cf.h,
+            mood: cf.m,
+            traits: cf.tr,
+            bornAt: cf.b
+        }));
+    }
+
     return s;
 }
 
@@ -132,6 +187,7 @@ function migrateV1(raw) {
     if (!s.fish.length) {
         s.fish.push(fishFactory.create(cfg.species[0].id, { growth: 6 }));
     }
+    codex.syncFromFish(s);
     return s;
 }
 

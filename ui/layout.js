@@ -97,8 +97,38 @@ var EGG_H = 104;
 var EGG_GAP = 10;
 var EGG_TOP = 92;
 
+/* ---- 图鉴页：第三个页签 ----
+ * 两列 × N 行，10 条鱼（含隐藏款）刚好 5 行。
+ * 卡片要放缩略图 + 名字 + 稀有度，比鱼卵卡扁一些。 */
+var CODEX_COLS = 2;
+var CODEX_CARD_H = 86;
+var CODEX_GAP = 9;
+var CODEX_TOP = 116;   /* 进度条在 88~108，卡片从 116 起，留出间距 */
+var CODEX_ROWS = Math.ceil(cfg.species.length / CODEX_COLS);
+
+/* ---- M9 鱼塘页（第 4 个页签）----
+ * 上半是池塘插图，下半是等级/鱼饵信息和一颗大「抛竿」按钮。 */
+var POND_TOP = 92;
+var POND_SCENE_H = 196;
+var POND_CAST_Y = POND_TOP + POND_SCENE_H + 58;
+var POND_CAST_H = 56;
+
+/* ---- M9 仓库页（第 5 个页签）----
+ * 鱼篓：3 × 3 网格（最多显示 9 条），下面一行是道具（珍珠贝/珍珠/鱼饵），
+ * 最底部一条操作栏，按选中的东西变（放缸 / 卖掉 / 打破 / 卖珍珠）。 */
+var BAG_TOP = 92;
+var BAG_COLS = 3;
+var BAG_ROWS = 3;
+var BAG_CELL_H = 76;
+var BAG_GAP = 8;
+var BAG_GRID_Y = BAG_TOP + 20;
+var BAG_ITEM_Y = BAG_GRID_Y + BAG_ROWS * (BAG_CELL_H + BAG_GAP) + 6;
+var BAG_ITEM_H = 72;
+var BAG_ACTION_Y = BAG_ITEM_Y + BAG_ITEM_H + 12;
+var BAG_ACTION_H = 48;
+
 var TAB_H = 30;
-var TAB_W = 84;
+var TAB_W = 64;   /* 5 个页签：18 + i*72，最后一个右边界 370，正好留 20 */
 
 /* 面板底部留白：要容得下底部那行提示文字 + 安全区，
  * 留小了提示会直接压在最后一行卡片上 */
@@ -106,8 +136,12 @@ var BOTTOM_PAD = 72;
 
 var itemsBottom = ITEM_TOP + cfg.items.length * (ITEM_H + ITEM_GAP) - ITEM_GAP;
 var eggsBottom = EGG_TOP + EGG_ROWS * (EGG_H + EGG_GAP) - EGG_GAP;
+var codexBottom = CODEX_TOP + CODEX_ROWS * (CODEX_CARD_H + CODEX_GAP) - CODEX_GAP;
+var pondBottom = POND_CAST_Y + POND_CAST_H;
+var bagBottom = BAG_ACTION_Y + BAG_ACTION_H;
 
-var SHEET_H = Math.min(H * 0.9, Math.max(itemsBottom, eggsBottom) + BOTTOM_PAD);
+var SHEET_H = Math.min(H * 0.9,
+    Math.max(itemsBottom, eggsBottom, codexBottom, pondBottom, bagBottom) + BOTTOM_PAD);
 
 function sheetTop(ease) {
     return H - SHEET_H * ease;
@@ -148,6 +182,96 @@ function eggThumbRect(i, ease) {
     var r = eggRect(i, ease);
     var s = 58;
     return { x: r.x + 10, y: r.y + (EGG_H - s) / 2, w: s, h: s };
+}
+
+/* 图鉴：进度条 + 两列卡片 */
+function codexProgressRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 18, y: top + 88, w: W - 36, h: 20 };
+}
+
+function codexRect(i, ease) {
+    var top = sheetTop(ease);
+    var col = i % CODEX_COLS;
+    var row = Math.floor(i / CODEX_COLS);
+    var gapX = 10;
+    var cw = (W - 32 - gapX) / CODEX_COLS;
+    return {
+        x: 16 + col * (cw + gapX),
+        y: top + CODEX_TOP + row * (CODEX_CARD_H + CODEX_GAP),
+        w: cw,
+        h: CODEX_CARD_H
+    };
+}
+
+/* 缩略图圆框：贴卡片左边 */
+function codexThumbRect(r) {
+    var rad = 26;
+    return { cx: r.x + 10 + rad, cy: r.y + r.h / 2, r: rad };
+}
+
+/* 详情浮层：屏幕居中的大卡 */
+function codexDetailRect(ease) {
+    var w = W - 44;
+    var h = 390;
+    return { x: (W - w) / 2, y: (H - h) / 2, w: w, h: h };
+}
+
+/* 大图放右上角，资料从左侧往下排，互不压字 */
+function codexDetailThumb(d) {
+    return { cx: d.x + d.w - 72, cy: d.y + 132, r: 42 };
+}
+
+function codexDetailClose(d) {
+    var s = 34;
+    return { x: d.x + d.w - s - 12, y: d.y + 12, w: s, h: s };
+}
+
+/* ---- 鱼塘页 ---- */
+function pondSceneRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 16, y: top + POND_TOP, w: W - 32, h: POND_SCENE_H };
+}
+
+function pondCastRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 16, y: top + POND_CAST_Y, w: W - 32, h: POND_CAST_H };
+}
+
+/* ---- 仓库页：鱼网格 ---- */
+function bagFishRect(i, ease) {
+    var top = sheetTop(ease);
+    var col = i % BAG_COLS;
+    var row = Math.floor(i / BAG_COLS);
+    var gapX = 8;
+    var cw = (W - 32 - gapX * (BAG_COLS - 1)) / BAG_COLS;
+    return {
+        x: 16 + col * (cw + gapX),
+        y: top + BAG_GRID_Y + row * (BAG_CELL_H + BAG_GAP),
+        w: cw,
+        h: BAG_CELL_H
+    };
+}
+
+/* ---- 仓库页：道具行（0=珍珠贝 1=珍珠 2=鱼饵）---- */
+function bagItemRect(i, ease) {
+    var top = sheetTop(ease);
+    var gapX = 8;
+    var cw = (W - 32 - gapX * 2) / 3;
+    return { x: 16 + i * (cw + gapX), y: top + BAG_ITEM_Y, w: cw, h: BAG_ITEM_H };
+}
+
+/* ---- 仓库页：底部操作栏（0=左 1=右）---- */
+function bagActionRect(k, ease) {
+    var top = sheetTop(ease);
+    var gapX = 10;
+    var bw = (W - 32 - gapX) / 2;
+    return {
+        x: 16 + k * (bw + gapX),
+        y: top + BAG_ACTION_Y,
+        w: bw,
+        h: BAG_ACTION_H
+    };
 }
 
 function sellBtnRect() {
@@ -204,6 +328,32 @@ module.exports = {
     eggRect: eggRect,
     eggBuyRect: eggBuyRect,
     eggThumbRect: eggThumbRect,
+    CODEX_COLS: CODEX_COLS,
+    CODEX_ROWS: CODEX_ROWS,
+    codexProgressRect: codexProgressRect,
+    codexRect: codexRect,
+    codexThumbRect: codexThumbRect,
+    codexDetailRect: codexDetailRect,
+    codexDetailThumb: codexDetailThumb,
+    codexDetailClose: codexDetailClose,
+    POND_TOP: POND_TOP,
+    POND_SCENE_H: POND_SCENE_H,
+    POND_CAST_Y: POND_CAST_Y,
+    POND_CAST_H: POND_CAST_H,
+    pondSceneRect: pondSceneRect,
+    pondCastRect: pondCastRect,
+    BAG_TOP: BAG_TOP,
+    BAG_COLS: BAG_COLS,
+    BAG_ROWS: BAG_ROWS,
+    BAG_CELL_H: BAG_CELL_H,
+    BAG_GRID_Y: BAG_GRID_Y,
+    BAG_ITEM_Y: BAG_ITEM_Y,
+    BAG_ITEM_H: BAG_ITEM_H,
+    BAG_ACTION_Y: BAG_ACTION_Y,
+    BAG_ACTION_H: BAG_ACTION_H,
+    bagFishRect: bagFishRect,
+    bagItemRect: bagItemRect,
+    bagActionRect: bagActionRect,
     SELL_BTN: SELL_BTN,
     sellBtnRect: sellBtnRect,
     closeRect: closeRect,

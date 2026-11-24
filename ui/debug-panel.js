@@ -115,7 +115,7 @@ function draw(ctx, session, state) {
     ctx.font = '400 11px sans-serif';
     ctx.fillStyle = '#5f8497';
     var value = 0;
-    for (var i = 0; i < state.fish.length; i++) value += fishLib.sellPriceOf(state.fish[i]);
+    for (var i = 0; i < state.fish.length; i++) value += fishLib.sellPriceOf(state.fish[i], state.shellLv);
     ctx.fillText('全缸身价 ' + wallet.format(value) + ' · 鱼 ' + state.fish.length +
         ' 条 · 账本 ' + state.ledger.length + ' 条', p.x + 14, p.y + PH - 12);
 }

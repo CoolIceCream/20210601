@@ -18,8 +18,8 @@
 
 var U = require('./util.js');
 
-var INK = '#3b2510';
-var INK_SOFT = 'rgba(59,37,16,0.72)';
+var INK = '#1a1526';
+var INK_SOFT = 'rgba(26,21,38,0.78)';
 
 /* 统一描边：细到 26px 也不糊，但要足够压住白色块 */
 function line(ctx, w) {
@@ -118,7 +118,7 @@ function auto(ctx, bg) {
     /* 轴孔填底色才像「洞」；用半透明墨色在深色块上会发灰 */
     ctx.beginPath();
     ctx.arc(0, 0, 0.145, 0, 6.2832);
-    ctx.fillStyle = bg || '#8a6d1f';
+    ctx.fillStyle = bg || '#8a6d2f';
     ctx.fill();
 }
 
@@ -204,6 +204,155 @@ function tank(ctx) {
     line(ctx, 0.065);
 }
 
+/* 招财贝壳：扇贝（扇形壳 + 放射肋 + 底部铰点）
+ * 关键是把「铰点」留在下方、壳面朝上张开 —— 倒过来会读成一把扇子 / 降落伞。
+ * 放射肋用深浅交替，26px 下仍能认出是贝壳而不是一块饼。 */
+function shell(ctx) {
+    /* 壳面：以底部铰点为圆心的扇形，张角略小于半圆 */
+    var cy = 0.34;
+    var R = 0.82;
+    var a0 = -Math.PI * 0.90;
+    var a1 = -Math.PI * 0.10;
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.arc(0, cy, R, a0, a1);
+    ctx.closePath();
+    white(ctx, 1);
+    line(ctx, 0.075);
+
+    /* 放射肋：从铰点扇出，裁进壳面不越界 */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.arc(0, cy, R, a0, a1);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    for (var i = 1; i < 7; i++) {
+        var a = a0 + (a1 - a0) * i / 7;
+        ctx.moveTo(0, cy + 0.02);
+        ctx.lineTo(Math.cos(a) * R, cy + Math.sin(a) * R);
+    }
+    ctx.strokeStyle = INK_SOFT;
+    ctx.lineWidth = 0.045;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+
+    /* 底部铰点：一小块收口，扇贝的「根」 */
+    ctx.beginPath();
+    U.ellipse(ctx, 0, cy + 0.01, 0.13, 0.085, 0);
+    white(ctx, 1);
+    line(ctx, 0.065);
+}
+
+/* 鱼饵：一条弯成 S 的蚯蚓
+ * 不能用直线 —— 直条在 26px 下会被读成一根棍子 / 刀。
+ * 先描粗墨线再压一条白芯，「软体」的感觉就出来了。 */
+function bait(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(-0.24, -0.27);
+    ctx.bezierCurveTo(0.30, -0.34, -0.32, 0.08, 0.22, 0.14);
+    ctx.bezierCurveTo(0.34, 0.24, 0.00, 0.37, -0.22, 0.30);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.27;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+    ctx.lineWidth = 0.15;
+    ctx.stroke();
+
+    /* 头端一个墨点，读起来才是一条虫而不是一根绳 */
+    ctx.beginPath();
+    ctx.arc(-0.22, -0.28, 0.075, 0, 6.2832);
+    ctx.fillStyle = INK;
+    ctx.fill();
+}
+
+/* 珍珠贝：微张的贝 + 中间一颗珍珠
+ * 和「招财贝壳」区分开 —— 那个是规则扇贝，这个是圆肚牡蛎抱珠。 */
+function oyster(ctx) {
+    /* 一整片圆鼓的贝壳（不是上下两片叠着 —— 那样会读成一只眼睛），
+     * 顶部收成铰点、底部圆，中间抱一颗珍珠。 */
+    ctx.beginPath();
+    ctx.moveTo(0, -0.43);
+    ctx.bezierCurveTo(0.34, -0.41, 0.47, 0.02, 0.37, 0.33);
+    ctx.bezierCurveTo(0.23, 0.45, -0.23, 0.45, -0.37, 0.33);
+    ctx.bezierCurveTo(-0.47, 0.02, -0.34, -0.41, 0, -0.43);
+    ctx.closePath();
+    /* 壳用冷白（偏蓝），和中间的淡紫珍珠拉开层次，否则 28px 下糊成一团白 */
+    ctx.fillStyle = 'rgba(222,234,248,0.98)';
+    ctx.fill();
+    line(ctx, 0.075);
+
+    /* 放射纹：从顶部铰点扇开，裁进壳里 */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, -0.43);
+    ctx.bezierCurveTo(0.34, -0.41, 0.47, 0.02, 0.37, 0.33);
+    ctx.bezierCurveTo(0.23, 0.45, -0.23, 0.45, -0.37, 0.33);
+    ctx.bezierCurveTo(-0.47, 0.02, -0.34, -0.41, 0, -0.43);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    for (var i = -2; i <= 2; i++) {
+        if (i === 0) continue;
+        ctx.moveTo(0, -0.40);
+        ctx.lineTo(i * 0.24, 0.46);
+    }
+    ctx.strokeStyle = 'rgba(26,21,38,0.30)';
+    ctx.lineWidth = 0.042;
+    ctx.stroke();
+    ctx.restore();
+
+    /* 珍珠：偏冷白 + 淡紫，和金色招财贝壳彻底分开 */
+    var g = ctx.createRadialGradient(-0.06, -0.04, 0.02, 0, 0.02, 0.19);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.5, '#e8ddfb');
+    g.addColorStop(1, '#9c7fc9');
+    ctx.beginPath();
+    ctx.arc(0, 0.02, 0.175, 0, 6.2832);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90,66,140,0.75)';
+    ctx.lineWidth = 0.05;
+    ctx.stroke();
+}
+
+/* 珍珠：一颗圆珠，冷白 + 淡紫反光，左上一点高光 */
+function pearl(ctx) {
+    var g = ctx.createRadialGradient(-0.12, -0.14, 0.02, 0, 0, 0.42);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.55, '#f4eeff');
+    g.addColorStop(1, '#bfa9e0');
+    ctx.beginPath();
+    ctx.arc(0, 0, 0.40, 0, 6.2832);
+    ctx.fillStyle = g;
+    ctx.fill();
+    line(ctx, 0.07);
+
+    ctx.beginPath();
+    ctx.arc(-0.13, -0.15, 0.075, 0, 6.2832);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fill();
+}
+
+/* 系统：四宫格（代替原来的店铺图标） */
+function menu(ctx) {
+    var s = 0.30;
+    var gap = 0.10;
+    var pts = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+    for (var i = 0; i < pts.length; i++) {
+        var cx = pts[i][0] * (s + gap) / 2;
+        var cy = pts[i][1] * (s + gap) / 2;
+        U.roundRect(ctx, cx - s / 2, cy - s / 2, s, s, 0.06);
+        white(ctx, 1);
+        line(ctx, 0.065);
+    }
+}
+
 /* 金币：唯一一个「不白」的图标 —— 白圆加内圈在 28px 下会读成靶心，
  * 金币本身就该是金的，干脆直接上金色渐变，放在任何色底上都成立。 */
 function coin(ctx) {
@@ -285,6 +434,11 @@ var ART = {
     auto: auto,
     warehouse: warehouse,
     tank: tank,
+    shell: shell,
+    bait: bait,
+    oyster: oyster,
+    pearl: pearl,
+    menu: menu,
     coin: coin,
     shop: shop
 };

@@ -252,19 +252,34 @@ function matureValueOf(sp) {
 
 /**
  * 一条鱼现在能卖多少钱。
- *   matureValue × 成长折价 × 词条加成
+ *   matureValue × 成长折价 × 词条加成 × 招财贝壳加成
  * 故意不看饱食/心情：饿鱼只是长得慢，不该按「状态不好」再砍一刀，
  * 否则玩家会觉得「我离线一趟回来鱼就贬值了」。
+ *
+ * shellLv 可选（0-3，默认 0）：招财贝壳的卖价倍率。
+ * 只在「卖鱼」这一端乘，matureValueOf / avgSellOf（卵价基准）不碰，
+ * 否则卵价会跟着水涨船高，加成等于白给。调用方不传就是原价，
+ * 老代码与测试全部保持原样。
  */
-function sellPriceOf(f) {
+function sellPriceOf(f, shellLv) {
     var S = cfg.economy.sell;
     var sp = speciesById(f.speciesId);
     var g = clamp01((f.growth || 0) / 100);
     var ratio = S.minRatio + (1 - S.minRatio) * Math.pow(g, S.curveExp);
     var traits = (f.traits && f.traits.length) ? 1 + S.traitBonus * f.traits.length : 1;
-    var p = matureValueOf(sp) * ratio * traits;
+    var bonusList = S.shellBonus || [1];
+    var lv = Math.max(0, Math.min(bonusList.length - 1, shellLv || 0));
+    var shell = bonusList[lv] || 1;
+    var p = matureValueOf(sp) * ratio * traits * shell;
     var step = S.step || 5;
     return Math.max(step, Math.round(p / step) * step);
+}
+
+/* 当前贝壳等级对应的卖价倍率（UI 显示「+30%」用） */
+function shellMulOf(shellLv) {
+    var list = (cfg.economy.sell.shellBonus || [1]);
+    var lv = Math.max(0, Math.min(list.length - 1, shellLv || 0));
+    return list[lv] || 1;
 }
 
 /* 新建一条鱼（带运行时字段） */
@@ -321,6 +336,7 @@ module.exports = {
     incomePerSecond: incomePerSecond,
     matureValueOf: matureValueOf,
     sellPriceOf: sellPriceOf,
+    shellMulOf: shellMulOf,
     passiveGrowthPerSecond: passiveGrowthPerSecond,
     feedGrowthPerPellet: feedGrowthPerPellet,
     isStarving: isStarving,

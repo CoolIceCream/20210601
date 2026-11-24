@@ -47,18 +47,18 @@ function drawCoin(ctx, cx, cy, r) {
 
 function drawCoinBlue(ctx, cx, cy, r) {
     var g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.4, 1, cx, cy, r);
-    U.stop(g, 0, '#d9f6ff');
-    U.stop(g, 0.55, '#4dc1ea');
-    U.stop(g, 1, '#1b7ba3');
+    U.stop(g, 0, '#cfe4f2');
+    U.stop(g, 0.55, '#6f9fc4');
+    U.stop(g, 1, '#2c5677');
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, 6.2832);
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.strokeStyle = '#12658a';
+    ctx.strokeStyle = '#24486a';
     ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    ctx.fillStyle = '#eafaff';
+    ctx.fillStyle = '#e8f2fa';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 9px sans-serif';
@@ -97,9 +97,9 @@ function drawPlayerCard(ctx, state) {
     var c = L.CARD;
 
     Th.jelly(ctx, c.x, c.y, c.w, c.h, {
-        top: '#ffffff',
-        bottom: '#f8ead1',
-        deep: 'rgba(140,98,52,0.24)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 18,
         depth: 3,
         ink: TT.ink,
@@ -111,7 +111,7 @@ function drawPlayerCard(ctx, state) {
     var a = L.AVATAR;
     ctx.beginPath();
     ctx.arc(a.cx, a.cy, a.r + 3, 0, 6.2832);
-    ctx.fillStyle = '#fff6e2';
+    ctx.fillStyle = '#2a3352';
     ctx.fill();
     ctx.strokeStyle = TT.ink;
     ctx.lineWidth = 2.2;
@@ -131,16 +131,16 @@ function drawPlayerCard(ctx, state) {
     var tk = storage.activeTankOf(state) + 1;
     ctx.beginPath();
     ctx.arc(a.cx + a.r - 3, a.cy + a.r - 3, 9, 0, 6.2832);
-    ctx.fillStyle = '#ff9f3d';
+    ctx.fillStyle = TT.vermilion;
     ctx.fill();
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = TT.goldLight;
     ctx.lineWidth = 2;
     ctx.stroke();
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 11px sans-serif';
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#fff3d2';
     ctx.fillText(String(tk), a.cx + a.r - 3, a.cy + a.r - 2.5);
 
     /* 名字 + 鱼位数字 */
@@ -156,7 +156,7 @@ function drawPlayerCard(ctx, state) {
 
     ctx.textAlign = 'right';
     ctx.font = '800 10.5px sans-serif';
-    ctx.fillStyle = perTank > 0 && here >= perTank ? '#c8441c' : TT.textSoft;
+    ctx.fillStyle = perTank > 0 && here >= perTank ? '#e06a55' : TT.textSoft;
     ctx.fillText(perTank > 0 ? here + '/' + perTank : String(here), c.x + c.w - 10, c.y + 18);
 
     /* 鱼位进度：槽 + 填充 */
@@ -164,24 +164,24 @@ function drawPlayerCard(ctx, state) {
     var p = perTank > 0 ? Math.min(1, here / perTank) : 0;
 
     roundRect(ctx, b.x, b.y, b.w, b.h, b.h / 2);
-    ctx.fillStyle = 'rgba(140,98,52,0.32)';
+    ctx.fillStyle = 'rgba(6,10,24,0.5)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(140,98,52,0.28)';
+    ctx.strokeStyle = 'rgba(200,164,92,0.4)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
     if (p > 0) {
         var fw = Math.max(b.h, b.w * p);
         var g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-        U.stop(g, 0, p >= 1 ? '#ffb35c' : '#a8ea74');
-        U.stop(g, 1, p >= 1 ? '#ef7a24' : '#4cae30');
+        U.stop(g, 0, p >= 1 ? '#e07a55' : '#e0c170');
+        U.stop(g, 1, p >= 1 ? '#a6332e' : '#9a7a35');
         roundRect(ctx, b.x, b.y, fw, b.h, b.h / 2);
         ctx.fillStyle = g;
         ctx.fill();
 
-        /* 前半截一点白，才有「软糖」的厚度 */
+        /* 前半截一点淡金，做出牌匾的高光 */
         roundRect(ctx, b.x + 2, b.y + 2, Math.max(0, fw - 4), b.h * 0.34, b.h * 0.17);
-        ctx.fillStyle = 'rgba(255,255,255,0.42)';
+        ctx.fillStyle = 'rgba(232,212,160,0.30)';
         ctx.fill();
     }
 }
@@ -190,9 +190,9 @@ function drawPlayerCard(ctx, state) {
 
 function pillBase(ctx, r) {
     Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-        top: '#ffffff',
-        bottom: '#fff1d6',
-        deep: 'rgba(150,105,50,0.24)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: r.h / 2,
         depth: 2.5,
         ink: TT.ink,
@@ -221,7 +221,7 @@ function drawCoinPill(ctx, state) {
         var st = wallet.format(s);
         ctx.textAlign = 'right';
         ctx.font = '800 11px sans-serif';
-        ctx.fillStyle = '#12658a';
+        ctx.fillStyle = TT.sky;
         ctx.fillText(st, r.x + r.w - 9, cy + 0.5);
         var sw = ctx.measureText(st).width;
         drawCoinBlue(ctx, r.x + r.w - 9 - sw - 8, cy, 7);
@@ -237,7 +237,7 @@ function drawFishPill(ctx, state) {
      * 这条胶囊读的是「所有缸加起来一共有几条鱼」。 */
     var total = (state.fish && state.fish.length) || 0;
 
-    drawFishIcon(ctx, r.x + 16, cy, 8.5, '#38b06a');
+    drawFishIcon(ctx, r.x + 16, cy, 8.5, '#6fbf9e');
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -275,9 +275,9 @@ function drawTankTabs(ctx, state) {
         var on = i === act;
 
         Th.badge(ctx, cx, cy, 9.5, {
-            top: on ? '#c4f59a' : (owned ? '#ffffff' : '#e6dac4'),
-            bottom: on ? '#5cc23f' : (owned ? '#f2e5c9' : '#cfc1a9'),
-            ink: owned ? TT.ink : 'rgba(107,68,35,0.4)',
+            top: on ? '#e0c170' : (owned ? TT.cardTop : '#232c46'),
+            bottom: on ? '#a8802f' : (owned ? TT.cardBottom : '#1a2238'),
+            ink: owned ? TT.ink : 'rgba(200,164,92,0.3)',
             lw: 2,
             gloss: on
         });
@@ -285,7 +285,7 @@ function drawTankTabs(ctx, state) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 10px sans-serif';
-        ctx.fillStyle = on ? '#ffffff' : (owned ? TT.text : 'rgba(107,68,35,0.45)');
+        ctx.fillStyle = on ? '#fff3d2' : (owned ? TT.text : 'rgba(200,164,92,0.4)');
         ctx.fillText(String(i + 1), cx, cy + 0.5);
     }
     ctx.restore();
@@ -299,9 +299,9 @@ function drawTankTabs(ctx, state) {
 
 function drawIconButton(ctx, r, o) {
     Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-        top: '#ffffff',
-        bottom: '#fbeccf',
-        deep: 'rgba(140,98,52,0.3)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 22,
         depth: 5,
         ink: TT.ink,
@@ -332,17 +332,17 @@ function drawButtons(ctx) {
     drawIconButton(ctx, L.FEED_BTN, {
         icon: 'feed',
         label: '撒食',
-        top: '#b6ec7d',
-        bottom: '#57b93c',
-        ink: '#2f7a25'
+        top: '#6fbf9e',
+        bottom: '#2f7a5e',
+        ink: '#1a5540'
     });
 
     drawIconButton(ctx, L.SHOP_BTN, {
-        icon: 'shop',
-        label: '商店',
-        top: '#9adaf8',
-        bottom: '#3f9fd4',
-        ink: '#1c6a94'
+        icon: 'menu',
+        label: '系统',
+        top: '#d8b96e',
+        bottom: '#a8802f',
+        ink: '#6f5220'
     });
 }
 
@@ -361,7 +361,7 @@ function drawFloaters(ctx, state) {
         var y = fl.y - 42 * p;
         ctx.globalAlpha = Math.max(0, 1 - p * p);
         ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(90,58,26,0.7)';
+        ctx.strokeStyle = 'rgba(6,10,24,0.8)';
         ctx.strokeText(fl.text, fl.x, y);
         ctx.fillStyle = fl.color;
         ctx.fillText(fl.text, fl.x, y);
@@ -386,12 +386,12 @@ function drawHint(ctx, state) {
     var by = C.TANK_TOP + 26;
 
     Th.jelly(ctx, (W - bw) / 2, by, bw, 34, {
-        top: 'rgba(255,255,255,0.92)',
-        bottom: 'rgba(255,241,214,0.92)',
-        deep: 'rgba(20,90,110,0.26)',
+        top: 'rgba(38,49,80,0.92)',
+        bottom: 'rgba(26,35,64,0.92)',
+        deep: 'rgba(6,10,24,0.5)',
         r: 17,
         depth: 2.5,
-        ink: 'rgba(107,68,35,0.55)',
+        ink: 'rgba(200,164,92,0.6)',
         lw: 1.8,
         gloss: false
     });
@@ -415,11 +415,12 @@ function drawToast(ctx, session) {
     var tw = ctx.measureText(session.toast.text).width + 36;
 
     Th.jelly(ctx, (W - tw) / 2, H * 0.36, tw, 42, {
-        top: '#fffdf4',
-        bottom: '#ffe7b8',
-        deep: 'rgba(140,96,46,0.34)',
+        top: '#263150',
+        bottom: '#1a2340',
+        deep: TT.cardDeep,
         r: 21,
         depth: 3,
+        ink: TT.ink,
         lw: 2.4
     });
 
@@ -440,16 +441,16 @@ function drawZoom(ctx) {
         var cx = r.x + r.w / 2;
         var cy = r.y + r.h / 2;
         Th.badge(ctx, cx, cy, r.w / 2, {
-            top: on ? '#ffffff' : '#e8ddc7',
-            bottom: on ? '#d7f3e2' : '#cbb99b',
-            ink: on ? '#2b7a5a' : '#9b8a70',
+            top: on ? '#e0c170' : TT.cardTop,
+            bottom: on ? '#a8802f' : TT.cardBottom,
+            ink: on ? TT.gold : TT.goldDeep,
             lw: 2,
             gloss: on
         });
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 18px sans-serif';
-        ctx.fillStyle = on ? '#216e50' : '#9b8a70';
+        ctx.fillStyle = on ? '#fff3d2' : TT.textSoft;
         ctx.fillText(txt, cx, cy + 0.5);
     }
 
@@ -461,12 +462,12 @@ function drawZoom(ctx) {
     ctx.textBaseline = 'middle';
     ctx.font = '800 10px sans-serif';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.strokeStyle = 'rgba(6,10,24,0.92)';
     ctx.lineWidth = 3;
     var lx = (L.ZOOM_OUT.x + L.ZOOM_IN.x + L.ZOOM_IN.w) / 2;
     var ly = L.ZOOM_OUT.y + L.ZOOM_OUT.h + 9;
     ctx.strokeText(view.label(), lx, ly);
-    ctx.fillStyle = '#2b6b76';
+    ctx.fillStyle = TT.goldLight;
     ctx.fillText(view.label(), lx, ly);
 }
 

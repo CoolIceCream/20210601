@@ -12,9 +12,12 @@ var modalRender = require('../render/modal.js');
 var sellRender = require('../render/sell.js');
 var debugPanel = require('./debug-panel.js');
 var shop = require('../core/shop.js');
+var pondCore = require('../core/pond.js');
 var storage = require('../core/storage.js');
 var fishLib = require('../core/fish.js');
 var wallet = require('../core/wallet.js');
+var platform = require('../platform.js');
+var cfg = require('../config/index.js');
 var view = require('./view.js');
 
 /* 点到了哪条鱼：命中半径比视觉尺寸小一圈，避免点水面撒食时误选 */
@@ -80,6 +83,18 @@ function handleSheet(x, y, env) {
     var state = env.state;
     var ease = session.sheetEase;
 
+    /* 图鉴详情浮层：吞掉面板内的一切点击，直到关闭 */
+    if (session.codexDetail != null) {
+        var d = L.codexDetailRect(ease);
+        if (U.inRect(x, y, L.codexDetailClose(d))) {
+            session.codexDetail = null;
+            return;
+        }
+        /* 点卡片外面也关掉；点卡片本体什么都不做 */
+        if (!U.inRect(x, y, d)) session.codexDetail = null;
+        return;
+    }
+
     if (U.inRect(x, y, L.closeRect(ease))) {
         session.sheetOpen = false;
         return;
@@ -90,12 +105,105 @@ function handleSheet(x, y, env) {
         return;
     }
 
-    /* 切换页签：道具 / 鱼卵 */
-    for (var t = 0; t < 2; t++) {
+    /* 切换页签：商店 / 鱼卵 / 图鉴 / 鱼塘 / 仓库 */
+    for (var t = 0; t < 5; t++) {
         if (U.inRect(x, y, L.tabRect(t, ease))) {
             session.sheetTab = t;
+            session.codexDetail = null;
+            session.bagSel = '';
             return;
         }
+    }
+
+    /* 鱼塘页：抛竿 */
+    if (session.sheetTab === 3) {
+        if (U.inRect(x, y, L.pondCastRect(ease))) {
+            /* 连点冷却：cd 内直接吞掉，避免一划手指连钓十次 */
+            var cd = ((cfg.pond.castCooldown || 0.5) * 1000);
+            var now = platform.now();
+            if (session.pondTapAt && now - session.pondTapAt < cd) return;
+            session.pondTapAt = now;
+
+            var cr = pondCore.cast(state);
+            if (!cr.ok) {
+                if (cr.reason === 'no_bait') session.showToast('鱼饵不足，去商店买');
+                else session.showToast('这个鱼塘暂时没鱼可钓');
+                return;
+            }
+            if (cr.type === 'oyster') {
+                session.showToast('钓到珍珠贝！去仓库打破');
+            } else {
+                session.showToast('钓到 ' + cr.species.name + ' · ' + Math.round(cr.fish.growth) + '%');
+            }
+            return;
+        }
+        return;
+    }
+
+    /* 仓库页：道具行 → 操作栏 → 鱼格 */
+    if (session.sheetTab === 4) {
+        var bagSt = pondCore.statusOf(state);
+
+        if (U.inRect(x, y, L.bagItemRect(0, ease))) {
+            var br = pondCore.breakOyster(state);
+            if (!br.ok) session.showToast('没有珍珠贝');
+            else session.showToast(br.pearl ? '开出珍珠！' : '空壳，什么也没有');
+            return;
+        }
+        if (U.inRect(x, y, L.bagItemRect(1, ease))) {
+            var pr = pondCore.sellPearl(state);
+            if (!pr.ok) session.showToast('没有珍珠');
+            else session.showToast('珍珠卖出 +' + wallet.format(pr.price));
+            return;
+        }
+        if (U.inRect(x, y, L.bagItemRect(2, ease))) {
+            session.showToast('鱼饵 ×' + bagSt.bait + ' · 去商店补充');
+            return;
+        }
+
+        if (session.bagSel) {
+            if (U.inRect(x, y, L.bagActionRect(0, ease))) {
+                var mv = pondCore.moveToTank(state, session.bagSel);
+                if (!mv.ok) {
+                    session.showToast(mv.reason === 'full' ? '鱼缸满了，先清出鱼位' : '这条鱼已经不在了');
+                } else {
+                    session.bagSel = '';
+                    session.showToast('已放进鱼缸');
+                }
+                return;
+            }
+            if (U.inRect(x, y, L.bagActionRect(1, ease))) {
+                var sc = pondCore.sellCaught(state, session.bagSel);
+                if (!sc.ok) session.showToast('这条鱼已经不在了');
+                else {
+                    session.bagSel = '';
+                    session.showToast('卖掉 +' + wallet.format(sc.price));
+                }
+                return;
+            }
+        }
+
+        var cells = pondCore.caughtList(state);
+        var maxShow = L.BAG_COLS * L.BAG_ROWS;
+        for (var ci = 0; ci < cells.length && ci < maxShow; ci++) {
+            if (U.inRect(x, y, L.bagFishRect(ci, ease))) {
+                session.bagSel = session.bagSel === cells[ci].fish.id ? '' : cells[ci].fish.id;
+                return;
+            }
+        }
+        return;
+    }
+
+    /* 图鉴页：点任意格子看详情 */
+    if (session.sheetTab === 2) {
+        var entries = require('../core/codex.js').list(state);
+        for (var c = 0; c < entries.length; c++) {
+            if (U.inRect(x, y, L.codexRect(c, ease))) {
+                session.codexDetail = c;
+                return;
+            }
+        }
+        return;
     }
 
     /* 鱼卵页：只卖三档品质，整张卡片都算买（点哪都是抽） */
@@ -213,6 +321,8 @@ function tap(x, y, env) {
     }
     if (U.inRect(x, y, L.SHOP_BTN)) {
         session.sheetOpen = true;
+        session.codexDetail = null;
+        session.bagSel = '';
         return;
     }
 

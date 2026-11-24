@@ -52,7 +52,7 @@ function settle(state, nowMs) {
     /* 离开那一刻的全缸身价：等下被吃掉的鱼也要算在「之前」里，
      * 这样弹窗的涨跌才是真的，不会假装它们从来没出现过。 */
     for (var i = 0; i < state.fish.length; i++) {
-        before += fishLib.sellPriceOf(state.fish[i]);
+        before += fishLib.sellPriceOf(state.fish[i], state.shellLv);
     }
 
     /* 捕食者离线也照样吃鱼，只是频率放慢（默认每 3 分钟一条）。
@@ -89,7 +89,7 @@ function settle(state, nowMs) {
             f.hunger = Math.max(floor, f.hunger - decay * seconds);
         }
 
-        after += fishLib.sellPriceOf(f);
+        after += fishLib.sellPriceOf(f, state.shellLv);
     }
 
     /* 没有鱼长大、也没有鱼被吃掉，就不打扰玩家 */

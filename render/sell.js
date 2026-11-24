@@ -57,7 +57,7 @@ function drawSelection(ctx, state) {
 
     /* 价签 */
     var sp = fishLib.speciesById(f.speciesId);
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
     var txt = sp.name + ' · 卖 ' + wallet.format(price);
 
     ctx.save();
@@ -68,8 +68,8 @@ function drawSelection(ctx, state) {
     var by = f.y - r - 32;
 
     Th.jelly(ctx, bx, by, bw, 24, {
-        top: '#fffdf6', bottom: '#ffe6b0',
-        deep: 'rgba(150,100,40,0.30)',
+        top: TT.cardTop, bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 12, depth: 2, ink: TT.ink, lw: 2, gloss: false
     });
 
@@ -93,20 +93,20 @@ function drawSellButton(ctx, state) {
 
     if (!f) {
         Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-            top: '#fbf7ee',
-            bottom: '#efe5d2',
-            deep: 'rgba(140,98,52,0.2)',
+            top: '#263150',
+            bottom: '#1a2340',
+            deep: TT.cardDeep,
             r: 22,
             depth: 5,
-            ink: 'rgba(107,68,35,0.32)',
+            ink: 'rgba(200,164,92,0.4)',
             lw: 2.4,
             gloss: false
         });
 
         Th.badge(ctx, cx, cy, 19, {
-            top: '#f3ebdb',
-            bottom: '#d9cbb2',
-            ink: 'rgba(107,68,35,0.34)',
+            top: '#2c3858',
+            bottom: '#202a44',
+            ink: 'rgba(200,164,92,0.4)',
             lw: 2.2,
             gloss: false
         });
@@ -119,7 +119,7 @@ function drawSellButton(ctx, state) {
         ctx.beginPath();
         ctx.arc(cx, cy, 18.4, 0, 6.2832);
         ctx.clip();
-        ctx.fillStyle = 'rgba(244,238,226,0.74)';
+        ctx.fillStyle = 'rgba(38,49,80,0.78)';
         ctx.fill();
         ctx.restore();
 
@@ -127,31 +127,31 @@ function drawSellButton(ctx, state) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 13px sans-serif';
-        ctx.fillStyle = '#b6a486';
+        ctx.fillStyle = TT.textSoft;
         ctx.fillText('卖掉', cx, b.y + 61);
         ctx.restore();
         return;
     }
 
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
 
     Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-        top: '#ffe6a8',
-        bottom: '#ffc266',
-        deep: 'rgba(160,88,10,0.38)',
+        top: TT.yellowTop,
+        bottom: TT.yellowBottom,
+        deep: TT.yellowDeep,
         r: 22,
         depth: 5,
-        ink: '#8a4a10',
+        ink: '#5f1e18',
         lw: 2.6,
         gloss: false
     });
 
-    /* 徽章用浅米底而不是橙色：金色金币压在橙底上会糊成一团，
-     * 换成浅底，金币的轮廓和中间的星才立得住。 */
+    /* 徽章用深墨底：金色金币压在朱红底上会糊成一团，
+     * 换成深底，金币的轮廓和中间的星才立得住。 */
     Th.badge(ctx, cx, cy, 19, {
-        top: '#fffdf2',
-        bottom: '#ffe7b8',
-        ink: '#8a4a10',
+        top: '#2a3352',
+        bottom: '#1a2340',
+        ink: TT.gold,
         lw: 2.4
     });
 
@@ -161,7 +161,7 @@ function drawSellButton(ctx, state) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 14px sans-serif';
-    ctx.fillStyle = '#7d3f08';
+    ctx.fillStyle = '#fff3d2';
     ctx.fillText('+' + wallet.format(price), cx, b.y + 61);
     ctx.restore();
 }

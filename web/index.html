@@ -651,7 +651,12 @@ module.exports = {
         eggDiscount: 0.78,
 
         /* 价格取整到 5，避免出现 4713 这种零头 */
-        step: 5
+        step: 5,
+
+        /* 招财贝壳：卖鱼加成，下标 = 贝壳等级（0=没买）。
+         * 只作用在「卖鱼成交价」和鱼身上的价签，不进卵价公式 ——
+         * 否则卵价跟着涨、加成又被卵价吃掉，等于白送。 */
+        shellBonus: [1, 1.3, 1.4, 1.5]
     },
 
     /* 传奇鱼卵：不走品质权重、不走解锁，固定 10 万金币，必出小鲨鱼。
@@ -940,19 +945,40 @@ module.exports = {
 
 module.exports = [
     /* 鱼类不再放在道具页：所有鱼都从「鱼卵」页按品质购买（随机出该品质的一条） */
+
+    /* 鱼饵：消耗品，按个买、钓一次扣一个。consumable 让 shop 走
+     * 「固定价、不封顶、显示持有数」的分支，而不是等级制。 */
+    {
+        id: 'bait',
+        icon: 'bait',
+        iconBg: '#3d5a2f',
+        name: '鱼饵',
+        desc: '钓鱼必备 · 每次消耗 1 个',
+        consumable: true,
+        price: { base: 10, mul: 1, step: 1 }
+    },
     {
         id: 'feed',
         icon: 'feed',
-        iconBg: '#2c7a4b',
+        iconBg: '#2f6348',
         name: '高级饲料',
         desc: '每粒营养更高，长得更快',
         maxLevel: 5,
         price: { base: 160, mul: 2, step: 1 }
     },
     {
+        id: 'shell',
+        icon: 'shell',
+        iconBg: '#2f5a72',
+        name: '招财贝壳',
+        desc: '卖鱼价格 +30%，可升级',
+        maxLevel: 3,
+        price: { base: 6000, mul: 3, step: 100 }
+    },
+    {
         id: 'coral',
         icon: 'coral',
-        iconBg: '#8c3b5a',
+        iconBg: '#7e3049',
         name: '珊瑚摆件',
         desc: '给水族箱添一株彩色珊瑚',
         price: { base: 180, mul: 1.65, step: 10 }
@@ -960,7 +986,7 @@ module.exports = [
     {
         id: 'auto',
         icon: 'auto',
-        iconBg: '#8a6d1f',
+        iconBg: '#8a6d2f',
         name: '自动喂食器',
         desc: '每 15 秒自动撒一次食',
         price: { base: 900, mul: 1, step: 1 }
@@ -968,7 +994,7 @@ module.exports = [
     {
         id: 'warehouse',
         icon: 'warehouse',
-        iconBg: '#3f5f8a',
+        iconBg: '#3f5285',
         name: '仓库扩容',
         desc: '鱼位 +3，离线结算也能存更久',
         maxLevel: 6,
@@ -977,7 +1003,7 @@ module.exports = [
     {
         id: 'tank',
         icon: 'tank',
-        iconBg: '#2f6f7a',
+        iconBg: '#2f5f72',
         name: '新鱼缸',
         desc: '多一个缸，鱼位直接相加',
         maxLevel: 3,
@@ -985,6 +1011,55 @@ module.exports = [
         price: { base: 1, mul: 1, step: 1 }
     }
 ];
+
+  };
+
+  defs["config/pond.js"] = function (module, exports, require) {
+/* ============================================================
+ * config/pond.js · 鱼塘 / 钓鱼 / 仓库（纯数据）
+ *
+ * 钓鱼是「廉价拿鱼苗」的渠道：鱼饵 10 金币，钓上来的鱼成长随机，
+ * 多数是小鱼苗，偶尔才有一条接近成鱼的大鱼。
+ * 这样 10 金币的成本不会变成印钞机 —— 大鱼是惊喜，不是常态。
+ *
+ * 鱼塘等级和鱼卵一样按品质分档，目前只开放第 1 档（普通）。
+ * 后续开放 SR / SSR 塘时，只改 openMax 与解锁价即可，
+ * 逻辑层按 levels[].rarity 自动筛选可钓的鱼种。
+ *
+ * 钓鱼还有小概率出「珍珠贝」，打破它 50% 得珍珠，珍珠卖 1 万。
+ * 这是钓鱼线的额外收益点，不占用鱼位。
+ * ============================================================ */
+
+module.exports = {
+    /* 鱼塘等级。rarity 决定能钓到哪一档鱼（见 core/pond.js · poolOf） */
+    levels: [
+        { lv: 1, name: '普通鱼塘', rarity: 'R', unlockCost: 0 },
+        { lv: 2, name: '稀有鱼塘', rarity: 'SR', unlockCost: 80000 },
+        { lv: 3, name: '传说鱼塘', rarity: 'SSR', unlockCost: 500000 }
+    ],
+
+    /* 当前开放到第几档（只开普通塘） */
+    openMax: 1,
+
+    /* 鱼饵：按个买，钓一次消耗一个 */
+    bait: {
+        price: 10,
+        perCatch: 1
+    },
+
+    /* 钓鱼产出：先判珍珠贝，剩下的全是鱼 */
+    oysterRate: 0.15,      /* 抛竿出珍珠贝的概率 */
+    oysterBreakRate: 0.5,  /* 打破珍珠贝出珍珠的概率 */
+    pearlPrice: 10000,     /* 珍珠卖价 */
+
+    /* 随机成长：growth = min + (max-min) × rand^exp
+     * exp > 1 → 结果偏小（小鱼苗多、大鱼少）。
+     * 2.2 时中位数约在 20 左右，约 6% 能钓到 80 以上的大鱼。 */
+    growth: { min: 8, max: 100, exp: 2.2 },
+
+    /* 抛竿冷却（秒）：防连点，也给「抛竿 → 收线」一点节奏 */
+    castCooldown: 0.5
+};
 
   };
 
@@ -1000,17 +1075,19 @@ var cfg = {
     species: require('./species.js'),
     traits: require('./traits.js'),
     items: require('./items.js'),
+    pond: require('./pond.js'),
 
     /* 品质配色：core 的飘字和 render 的品质卡片共用一份，避免两边各写一遍 */
     rarityColor: {
-        R: '#bfe6c8',
-        SR: '#8fd0ff',
-        SSR: '#ffd76a'
+        R: '#a8e0c4',
+        SR: '#e8d4a0',
+        SSR: '#f4a08e'
     },
 
     /* 版本号：改了存档结构要加 1，并在 core/save.js 补迁移
-     * v4 = M2 多鱼缸（tankCount / activeTank / 每条鱼的 tk） */
-    saveVersion: 4,
+     * v4 = M2 多鱼缸（tankCount / activeTank / 每条鱼的 tk）
+     * v5 = M9 鱼塘/仓库（pondLv / bag / caught） */
+    saveVersion: 5,
 
     /* 调试面板：true 时启动即打开（发布前置 false） */
     debug: {
@@ -1362,19 +1439,34 @@ function matureValueOf(sp) {
 
 /**
  * 一条鱼现在能卖多少钱。
- *   matureValue × 成长折价 × 词条加成
+ *   matureValue × 成长折价 × 词条加成 × 招财贝壳加成
  * 故意不看饱食/心情：饿鱼只是长得慢，不该按「状态不好」再砍一刀，
  * 否则玩家会觉得「我离线一趟回来鱼就贬值了」。
+ *
+ * shellLv 可选（0-3，默认 0）：招财贝壳的卖价倍率。
+ * 只在「卖鱼」这一端乘，matureValueOf / avgSellOf（卵价基准）不碰，
+ * 否则卵价会跟着水涨船高，加成等于白给。调用方不传就是原价，
+ * 老代码与测试全部保持原样。
  */
-function sellPriceOf(f) {
+function sellPriceOf(f, shellLv) {
     var S = cfg.economy.sell;
     var sp = speciesById(f.speciesId);
     var g = clamp01((f.growth || 0) / 100);
     var ratio = S.minRatio + (1 - S.minRatio) * Math.pow(g, S.curveExp);
     var traits = (f.traits && f.traits.length) ? 1 + S.traitBonus * f.traits.length : 1;
-    var p = matureValueOf(sp) * ratio * traits;
+    var bonusList = S.shellBonus || [1];
+    var lv = Math.max(0, Math.min(bonusList.length - 1, shellLv || 0));
+    var shell = bonusList[lv] || 1;
+    var p = matureValueOf(sp) * ratio * traits * shell;
     var step = S.step || 5;
     return Math.max(step, Math.round(p / step) * step);
+}
+
+/* 当前贝壳等级对应的卖价倍率（UI 显示「+30%」用） */
+function shellMulOf(shellLv) {
+    var list = (cfg.economy.sell.shellBonus || [1]);
+    var lv = Math.max(0, Math.min(list.length - 1, shellLv || 0));
+    return list[lv] || 1;
 }
 
 /* 新建一条鱼（带运行时字段） */
@@ -1431,12 +1523,128 @@ module.exports = {
     incomePerSecond: incomePerSecond,
     matureValueOf: matureValueOf,
     sellPriceOf: sellPriceOf,
+    shellMulOf: shellMulOf,
     passiveGrowthPerSecond: passiveGrowthPerSecond,
     feedGrowthPerPellet: feedGrowthPerPellet,
     isStarving: isStarving,
     traitOutputMul: traitOutputMul,
     rollTraits: rollTraits,
     create: create
+};
+
+  };
+
+  defs["core/codex.js"] = function (module, exports, require) {
+/* ============================================================
+ * core/codex.js · 鱼类图鉴（收录状态）
+ *
+ * 图鉴记住的是「曾经拥有过」：鱼卖掉、被鲨鱼吃掉之后，
+ * 条目仍然算已发现。这和缸里现有的鱼是两回事。
+ *
+ * state.discovered 结构：
+ *   { speciesId: { n: 累计获得条数, t: 首次获得时间戳 } }
+ *
+ * 收录时机：
+ *   - 买卵开出鱼   → shop.buyEgg 调 mark()
+ *   - 开局第一条鱼 → bootstrapFresh 调 mark()
+ *   - 老档读进来   → save.deserialize 调 syncFromFish() 补录
+ * ============================================================ */
+
+var cfg = require('../config/index.js');
+var fishLib = require('./fish.js');
+var platform = require('../platform.js');
+
+function table(state) {
+    if (!state.discovered || typeof state.discovered !== 'object') {
+        state.discovered = {};
+    }
+    return state.discovered;
+}
+
+/* 收录一条鱼。返回 true 表示是新发现（首次），false 表示之前已有 */
+function mark(state, speciesId) {
+    if (!speciesId) return false;
+    var t = table(state);
+    var rec = t[speciesId];
+    if (!rec) {
+        t[speciesId] = { n: 1, t: platform.now() };
+        return true;
+    }
+    rec.n = (rec.n || 0) + 1;
+    return false;
+}
+
+/* 用当前缸里的鱼补录（读档兼容：老版本没有 discovered 字段） */
+function syncFromFish(state) {
+    var added = 0;
+    for (var i = 0; i < state.fish.length; i++) {
+        if (mark(state, state.fish[i].speciesId)) added += 1;
+    }
+    return added;
+}
+
+function isFound(state, speciesId) {
+    return !!table(state)[speciesId];
+}
+
+function foundCount(state) {
+    var n = 0;
+    var t = table(state);
+    for (var i = 0; i < cfg.species.length; i++) {
+        if (t[cfg.species[i].id]) n += 1;
+    }
+    return n;
+}
+
+function totalCount() {
+    return cfg.species.length;
+}
+
+/* 图鉴条目。未发现的鱼也占位，但名字和资料打码，只留剪影 */
+function list(state) {
+    var t = table(state);
+    var out = [];
+    for (var i = 0; i < cfg.species.length; i++) {
+        var sp = cfg.species[i];
+        var rec = t[sp.id];
+        out.push({
+            sp: sp,
+            index: i + 1,
+            found: !!rec,
+            count: rec ? (rec.n || 0) : 0,
+            firstAt: rec ? rec.t : 0,
+            price: fishLib.matureValueOf(sp),
+            mature: sp.matureSeconds || 120,
+            source: sourceOf(sp)
+        });
+    }
+    return out;
+}
+
+function sourceOf(sp) {
+    if (sp.secret) return '普通鱼卵 0.1% · 传奇鱼卵必出';
+    if (sp.rarity === 'R') return '普通鱼卵';
+    if (sp.rarity === 'SR') return '稀有鱼卵';
+    if (sp.rarity === 'SSR') return '传说鱼卵';
+    return '鱼卵';
+}
+
+function progress(state) {
+    var total = totalCount();
+    var found = foundCount(state);
+    return { found: found, total: total, percent: total ? found / total : 0 };
+}
+
+module.exports = {
+    table: table,
+    mark: mark,
+    syncFromFish: syncFromFish,
+    isFound: isFound,
+    foundCount: foundCount,
+    totalCount: totalCount,
+    list: list,
+    progress: progress,
+    sourceOf: sourceOf
 };
 
   };
@@ -1454,6 +1662,7 @@ module.exports = {
 var cfg = require('../config/index.js');
 var platform = require('../platform.js');
 var fishFactory = require('./fish.js');
+var codex = require('./codex.js');
 
 function create() {
     return {
@@ -1471,6 +1680,7 @@ function create() {
 
         /* ---- 养成 / 设施 ---- */
         foodLv: 1,
+        shellLv: 0,         /* 招财贝壳等级 0-3：卖鱼价 +30/40/50% */
         auto: false,
         corals: 0,
         storageLv: 1,       /* 仓库等级：决定存储上限与离线结算时长 */
@@ -1480,6 +1690,22 @@ function create() {
         /* ---- 实体 ---- */
         fish: [],
         foods: [],
+
+        /* ---- M9 鱼塘 / 仓库 ----
+         * pondLv  鱼塘等级（1=普通，当前只开这一档）
+         * bag     仓库里的道具计数：鱼饵 / 珍珠贝 / 珍珠
+         * caught  钓到但还没放进鱼缸的鱼（完整鱼对象，tank 无意义） */
+        pondLv: 1,
+        bag: {
+            bait: 0,
+            oyster: 0,
+            pearl: 0
+        },
+        caught: [],
+
+        /* ---- 图鉴收录：曾经拥有过的鱼种（卖掉/被吃也算） ----
+         * { speciesId: { n: 累计条数, t: 首次获得时间 } } */
+        discovered: {},
 
         /* ---- 收益累加器：不足 1 枚的零头先攒着，攒够再入账 ---- */
         acc: {
@@ -1525,6 +1751,7 @@ function bootstrapFresh() {
     f.x = 195;
     f.y = 300;
     s.fish.push(f);
+    codex.mark(s, f.speciesId);   /* 开局那条鱼也要进图鉴 */
     return s;
 }
 
@@ -1681,6 +1908,7 @@ var platform = require('../platform.js');
 var fishFactory = require('./fish.js');
 var stateModule = require('./state.js');
 var storage = require('./storage.js');
+var codex = require('./codex.js');
 
 var KEY = 'aquarium_save';
 var LEGACY_V2_KEY = 'aquarium_save_v2';
@@ -1700,12 +1928,35 @@ function serialize(state) {
         },
         acc: state.acc.fish,
         foodLv: state.foodLv,
+        shellLv: state.shellLv || 0,
         auto: !!state.auto,
         corals: state.corals,
         storageLv: state.storageLv,
         tankCount: state.tankCount,
         activeTank: state.activeTank,
         stats: state.stats,
+        discovered: codex.table(state),
+
+        /* M9 鱼塘 / 仓库 */
+        pondLv: state.pondLv || 1,
+        bag: {
+            bait: (state.bag && state.bag.bait) || 0,
+            oyster: (state.bag && state.bag.oyster) || 0,
+            pearl: (state.bag && state.bag.pearl) || 0
+        },
+        /* 仓库里的鱼还没进缸，不存坐标，放进去时由 ensurePlacement 兜底 */
+        caught: (state.caught || []).map(function (f) {
+            return {
+                id: f.id,
+                sp: f.speciesId,
+                g: f.growth,
+                h: f.hunger,
+                m: f.mood,
+                tr: f.traits || [],
+                b: f.bornAt || 0
+            };
+        }),
+
         fish: state.fish.map(function (f) {
             return {
                 id: f.id,
@@ -1738,6 +1989,9 @@ function deserializeV2(raw) {
     s.coins.s = Number(raw.coins && raw.coins.s) || 0;
     s.acc.fish = Number(raw.acc) || 0;
     s.foodLv = Math.max(1, Math.min(5, raw.foodLv || 1));
+    /* 招财贝壳：老档没有这个字段，读成 0 就等于没买过 */
+    var maxShell = (cfg.economy.sell.shellBonus || [1]).length - 1;
+    s.shellLv = Math.max(0, Math.min(maxShell, Math.floor(raw.shellLv || 0)));
     s.auto = !!raw.auto;
     s.corals = Math.max(0, raw.corals || 0);
     /* v2 没有这个字段，补默认值就等于完成迁移 */
@@ -1771,6 +2025,34 @@ function deserializeV2(raw) {
             y: it.y || 0
         }));
     }
+    /* 图鉴：新档读 discovered；老档没有则从现有鱼补录 */
+    if (raw.discovered && typeof raw.discovered === 'object') {
+        s.discovered = raw.discovered;
+    }
+    codex.syncFromFish(s);
+
+    /* M9 鱼塘 / 仓库：老档没有这些字段，补默认值就等于迁移 */
+    var pondMax = Math.max(1, cfg.pond.openMax || 1);
+    s.pondLv = Math.max(1, Math.min(pondMax, Math.floor(raw.pondLv || 1)));
+    var rawBag = raw.bag || {};
+    s.bag = {
+        bait: Math.max(0, Math.floor(rawBag.bait || 0)),
+        oyster: Math.max(0, Math.floor(rawBag.oyster || 0)),
+        pearl: Math.max(0, Math.floor(rawBag.pearl || 0))
+    };
+    var caughtList = raw.caught || [];
+    for (var ci = 0; ci < caughtList.length; ci++) {
+        var cf = caughtList[ci];
+        s.caught.push(fishFactory.create(cf.sp, {
+            id: cf.id,
+            growth: cf.g,
+            hunger: cf.h,
+            mood: cf.m,
+            traits: cf.tr,
+            bornAt: cf.b
+        }));
+    }
+
     return s;
 }
 
@@ -1797,6 +2079,7 @@ function migrateV1(raw) {
     if (!s.fish.length) {
         s.fish.push(fishFactory.create(cfg.species[0].id, { growth: 6 }));
     }
+    codex.syncFromFish(s);
     return s;
 }
 
@@ -2034,7 +2317,7 @@ function settle(state, nowMs) {
     /* 离开那一刻的全缸身价：等下被吃掉的鱼也要算在「之前」里，
      * 这样弹窗的涨跌才是真的，不会假装它们从来没出现过。 */
     for (var i = 0; i < state.fish.length; i++) {
-        before += fishLib.sellPriceOf(state.fish[i]);
+        before += fishLib.sellPriceOf(state.fish[i], state.shellLv);
     }
 
     /* 捕食者离线也照样吃鱼，只是频率放慢（默认每 3 分钟一条）。
@@ -2071,7 +2354,7 @@ function settle(state, nowMs) {
             f.hunger = Math.max(floor, f.hunger - decay * seconds);
         }
 
-        after += fishLib.sellPriceOf(f);
+        after += fishLib.sellPriceOf(f, state.shellLv);
     }
 
     /* 没有鱼长大、也没有鱼被吃掉，就不打扰玩家 */
@@ -2233,6 +2516,7 @@ var cfg = require('../config/index.js');
 var wallet = require('./wallet.js');
 var fishLib = require('./fish.js');
 var storage = require('./storage.js');
+var codex = require('./codex.js');
 
 function itemById(id) {
     for (var i = 0; i < cfg.items.length; i++) {
@@ -2244,6 +2528,8 @@ function itemById(id) {
 /* 当前等级（只有带 maxLevel 的条目才有意义） */
 function levelOf(state, id) {
     if (id === 'feed') return state.foodLv;
+    if (id === 'bait') return Math.max(0, (state.bag && state.bag.bait) || 0);
+    if (id === 'shell') return state.shellLv || 0;
     if (id === 'warehouse') return storage.levelOf(state);
     if (id === 'tank') return storage.tankCountOf(state);
     return 0;
@@ -2252,6 +2538,10 @@ function levelOf(state, id) {
 /* 已购次数，用来算价格和判断满级 */
 function purchaseCount(state, id) {
     if (id === 'feed') return Math.max(0, state.foodLv - 1);
+    /* 消耗品价格恒定：不走 base×mul^n 的涨价格 */
+    if (id === 'bait') return 0;
+    /* 贝壳从 0 级起买：已购次数 = 当前等级（0→1 花 base，1→2 花 base×mul） */
+    if (id === 'shell') return Math.max(0, state.shellLv || 0);
     if (id === 'coral') return state.corals;
     if (id === 'auto') return state.auto ? 1 : 0;
     if (id === 'warehouse') return Math.max(0, storage.levelOf(state) - 1);
@@ -2295,6 +2585,16 @@ function statusOf(state, item) {
     else label = price >= 10000 ? wallet.format(price) : String(price);
 
     var desc = item.desc;
+    if (item.id === 'bait') {
+        desc = cur > 0 ? ('钓鱼必备 · 现有 ' + cur + ' 个') : '钓鱼必备 · 每次消耗 1 个';
+    }
+    if (item.id === 'shell') {
+        var gains = cfg.economy.sell.shellBonus || [1];
+        function pct(v) { return Math.round((v - 1) * 100) + '%'; }
+        desc = cur > 0 ? ('当前卖鱼 +' + pct(gains[Math.min(cur, gains.length - 1)])) : item.desc;
+        if (maxed) desc = '卖鱼价 +' + pct(gains[gains.length - 1]) + ' · 已满级';
+        else if (cur > 0) desc += ' → 下一级 +' + pct(gains[Math.min(cur + 1, gains.length - 1)]);
+    }
     if (item.id === 'feed' && maxed) desc = '已经是最高等级';
     if (item.id === 'auto' && owned) desc = '运行中：每 ' + cfg.economy.autoFeeder.interval + ' 秒撒一次食';
     if (item.id === 'tank') {
@@ -2323,6 +2623,10 @@ function statusOf(state, item) {
 
     var level = '';
     if (item.id === 'feed') level = maxed ? 'MAX' : 'Lv.' + state.foodLv;
+    if (item.id === 'bait') level = '×' + cur;
+    if (item.id === 'shell') {
+        level = maxed ? 'MAX' : 'Lv.' + cur + '/' + item.maxLevel;
+    }
     if (item.id === 'warehouse') {
         level = (maxed ? 'MAX' : 'Lv.' + storage.levelOf(state) + '/' + storage.maxLevel()) +
             ' · ' + storage.offlineHoursOf(state) + 'h';
@@ -2373,8 +2677,12 @@ function buy(state, id) {
         state.tankCount = Math.min(storage.maxTanks(), storage.tankCountOf(state) + 1);
         /* 开缸后把视图切过去：让玩家立刻看到空缸，而不是以为买了个寂寞 */
         state.activeTank = state.tankCount - 1;
+    } else if (id === 'bait') {
+        state.bag.bait = Math.max(0, (state.bag.bait || 0)) + 1;
     } else if (id === 'feed') {
         state.foodLv = Math.min(item.maxLevel, state.foodLv + 1);
+    } else if (id === 'shell') {
+        state.shellLv = Math.min(item.maxLevel, (state.shellLv || 0) + 1);
     } else if (id === 'coral') {
         state.corals += 1;
     } else if (id === 'auto') {
@@ -2605,6 +2913,7 @@ function buyEgg(state, rarity) {
 
     var sp = rollInRarity(rarity);
     state.fish.push(fishLib.create(sp.id, { growth: 2, rollTraits: true, tank: slot }));
+    codex.mark(state, sp.id);   /* 图鉴收录：卖掉后仍算发现过 */
     return { ok: true, reason: '', species: sp, rarity: rarity, price: st.price, tank: slot };
 }
 
@@ -2623,7 +2932,7 @@ function sellFish(state, fishId) {
 
     var f = state.fish[idx];
     var sp = fishLib.speciesById(f.speciesId);
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
 
     state.fish.splice(idx, 1);
     wallet.add(state, 'fish', price, 'sell:' + sp.id);
@@ -2634,13 +2943,14 @@ function sellFish(state, fishId) {
 function sellableOf(state) {
     var out = [];
     for (var i = 0; i < state.fish.length; i++) {
-        out.push({ fish: state.fish[i], price: fishLib.sellPriceOf(state.fish[i]) });
+        out.push({ fish: state.fish[i], price: fishLib.sellPriceOf(state.fish[i], state.shellLv) });
     }
     return out;
 }
 
 module.exports = {
     itemById: itemById,
+    levelOf: levelOf,
     priceOf: priceOf,
     statusOf: statusOf,
     list: list,
@@ -3233,7 +3543,10 @@ module.exports = {
     /* 商店 */
     sheetOpen: false,
     sheetEase: 0,
-    sheetTab: 0,        /* 0 = 道具 · 1 = 鱼卵 */
+    sheetTab: 0,        /* 0=商店 1=鱼卵 2=图鉴 3=鱼塘 4=仓库 */
+    codexDetail: null,  /* 图鉴详情条目的序号（0 基），null = 不显示 */
+    bagSel: '',         /* 仓库页当前选中的鱼 id，'' = 没选 */
+    pondTapAt: 0,       /* 上次抛竿时间戳，用来做连点冷却 */
 
     /* 模态弹窗：{ type:'offline', seconds, gain, capped } */
     modal: null,
@@ -3488,8 +3801,38 @@ var EGG_H = 104;
 var EGG_GAP = 10;
 var EGG_TOP = 92;
 
+/* ---- 图鉴页：第三个页签 ----
+ * 两列 × N 行，10 条鱼（含隐藏款）刚好 5 行。
+ * 卡片要放缩略图 + 名字 + 稀有度，比鱼卵卡扁一些。 */
+var CODEX_COLS = 2;
+var CODEX_CARD_H = 86;
+var CODEX_GAP = 9;
+var CODEX_TOP = 116;   /* 进度条在 88~108，卡片从 116 起，留出间距 */
+var CODEX_ROWS = Math.ceil(cfg.species.length / CODEX_COLS);
+
+/* ---- M9 鱼塘页（第 4 个页签）----
+ * 上半是池塘插图，下半是等级/鱼饵信息和一颗大「抛竿」按钮。 */
+var POND_TOP = 92;
+var POND_SCENE_H = 196;
+var POND_CAST_Y = POND_TOP + POND_SCENE_H + 58;
+var POND_CAST_H = 56;
+
+/* ---- M9 仓库页（第 5 个页签）----
+ * 鱼篓：3 × 3 网格（最多显示 9 条），下面一行是道具（珍珠贝/珍珠/鱼饵），
+ * 最底部一条操作栏，按选中的东西变（放缸 / 卖掉 / 打破 / 卖珍珠）。 */
+var BAG_TOP = 92;
+var BAG_COLS = 3;
+var BAG_ROWS = 3;
+var BAG_CELL_H = 76;
+var BAG_GAP = 8;
+var BAG_GRID_Y = BAG_TOP + 20;
+var BAG_ITEM_Y = BAG_GRID_Y + BAG_ROWS * (BAG_CELL_H + BAG_GAP) + 6;
+var BAG_ITEM_H = 72;
+var BAG_ACTION_Y = BAG_ITEM_Y + BAG_ITEM_H + 12;
+var BAG_ACTION_H = 48;
+
 var TAB_H = 30;
-var TAB_W = 84;
+var TAB_W = 64;   /* 5 个页签：18 + i*72，最后一个右边界 370，正好留 20 */
 
 /* 面板底部留白：要容得下底部那行提示文字 + 安全区，
  * 留小了提示会直接压在最后一行卡片上 */
@@ -3497,8 +3840,12 @@ var BOTTOM_PAD = 72;
 
 var itemsBottom = ITEM_TOP + cfg.items.length * (ITEM_H + ITEM_GAP) - ITEM_GAP;
 var eggsBottom = EGG_TOP + EGG_ROWS * (EGG_H + EGG_GAP) - EGG_GAP;
+var codexBottom = CODEX_TOP + CODEX_ROWS * (CODEX_CARD_H + CODEX_GAP) - CODEX_GAP;
+var pondBottom = POND_CAST_Y + POND_CAST_H;
+var bagBottom = BAG_ACTION_Y + BAG_ACTION_H;
 
-var SHEET_H = Math.min(H * 0.9, Math.max(itemsBottom, eggsBottom) + BOTTOM_PAD);
+var SHEET_H = Math.min(H * 0.9,
+    Math.max(itemsBottom, eggsBottom, codexBottom, pondBottom, bagBottom) + BOTTOM_PAD);
 
 function sheetTop(ease) {
     return H - SHEET_H * ease;
@@ -3539,6 +3886,96 @@ function eggThumbRect(i, ease) {
     var r = eggRect(i, ease);
     var s = 58;
     return { x: r.x + 10, y: r.y + (EGG_H - s) / 2, w: s, h: s };
+}
+
+/* 图鉴：进度条 + 两列卡片 */
+function codexProgressRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 18, y: top + 88, w: W - 36, h: 20 };
+}
+
+function codexRect(i, ease) {
+    var top = sheetTop(ease);
+    var col = i % CODEX_COLS;
+    var row = Math.floor(i / CODEX_COLS);
+    var gapX = 10;
+    var cw = (W - 32 - gapX) / CODEX_COLS;
+    return {
+        x: 16 + col * (cw + gapX),
+        y: top + CODEX_TOP + row * (CODEX_CARD_H + CODEX_GAP),
+        w: cw,
+        h: CODEX_CARD_H
+    };
+}
+
+/* 缩略图圆框：贴卡片左边 */
+function codexThumbRect(r) {
+    var rad = 26;
+    return { cx: r.x + 10 + rad, cy: r.y + r.h / 2, r: rad };
+}
+
+/* 详情浮层：屏幕居中的大卡 */
+function codexDetailRect(ease) {
+    var w = W - 44;
+    var h = 390;
+    return { x: (W - w) / 2, y: (H - h) / 2, w: w, h: h };
+}
+
+/* 大图放右上角，资料从左侧往下排，互不压字 */
+function codexDetailThumb(d) {
+    return { cx: d.x + d.w - 72, cy: d.y + 132, r: 42 };
+}
+
+function codexDetailClose(d) {
+    var s = 34;
+    return { x: d.x + d.w - s - 12, y: d.y + 12, w: s, h: s };
+}
+
+/* ---- 鱼塘页 ---- */
+function pondSceneRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 16, y: top + POND_TOP, w: W - 32, h: POND_SCENE_H };
+}
+
+function pondCastRect(ease) {
+    var top = sheetTop(ease);
+    return { x: 16, y: top + POND_CAST_Y, w: W - 32, h: POND_CAST_H };
+}
+
+/* ---- 仓库页：鱼网格 ---- */
+function bagFishRect(i, ease) {
+    var top = sheetTop(ease);
+    var col = i % BAG_COLS;
+    var row = Math.floor(i / BAG_COLS);
+    var gapX = 8;
+    var cw = (W - 32 - gapX * (BAG_COLS - 1)) / BAG_COLS;
+    return {
+        x: 16 + col * (cw + gapX),
+        y: top + BAG_GRID_Y + row * (BAG_CELL_H + BAG_GAP),
+        w: cw,
+        h: BAG_CELL_H
+    };
+}
+
+/* ---- 仓库页：道具行（0=珍珠贝 1=珍珠 2=鱼饵）---- */
+function bagItemRect(i, ease) {
+    var top = sheetTop(ease);
+    var gapX = 8;
+    var cw = (W - 32 - gapX * 2) / 3;
+    return { x: 16 + i * (cw + gapX), y: top + BAG_ITEM_Y, w: cw, h: BAG_ITEM_H };
+}
+
+/* ---- 仓库页：底部操作栏（0=左 1=右）---- */
+function bagActionRect(k, ease) {
+    var top = sheetTop(ease);
+    var gapX = 10;
+    var bw = (W - 32 - gapX) / 2;
+    return {
+        x: 16 + k * (bw + gapX),
+        y: top + BAG_ACTION_Y,
+        w: bw,
+        h: BAG_ACTION_H
+    };
 }
 
 function sellBtnRect() {
@@ -3595,6 +4032,32 @@ module.exports = {
     eggRect: eggRect,
     eggBuyRect: eggBuyRect,
     eggThumbRect: eggThumbRect,
+    CODEX_COLS: CODEX_COLS,
+    CODEX_ROWS: CODEX_ROWS,
+    codexProgressRect: codexProgressRect,
+    codexRect: codexRect,
+    codexThumbRect: codexThumbRect,
+    codexDetailRect: codexDetailRect,
+    codexDetailThumb: codexDetailThumb,
+    codexDetailClose: codexDetailClose,
+    POND_TOP: POND_TOP,
+    POND_SCENE_H: POND_SCENE_H,
+    POND_CAST_Y: POND_CAST_Y,
+    POND_CAST_H: POND_CAST_H,
+    pondSceneRect: pondSceneRect,
+    pondCastRect: pondCastRect,
+    BAG_TOP: BAG_TOP,
+    BAG_COLS: BAG_COLS,
+    BAG_ROWS: BAG_ROWS,
+    BAG_CELL_H: BAG_CELL_H,
+    BAG_GRID_Y: BAG_GRID_Y,
+    BAG_ITEM_Y: BAG_ITEM_Y,
+    BAG_ITEM_H: BAG_ITEM_H,
+    BAG_ACTION_Y: BAG_ACTION_Y,
+    BAG_ACTION_H: BAG_ACTION_H,
+    bagFishRect: bagFishRect,
+    bagItemRect: bagItemRect,
+    bagActionRect: bagActionRect,
     SELL_BTN: SELL_BTN,
     sellBtnRect: sellBtnRect,
     closeRect: closeRect,
@@ -3605,54 +4068,62 @@ module.exports = {
 
   defs["render/theme.js"] = function (module, exports, require) {
 /* ============================================================
- * render/theme.js · Q 版视觉规范（M2 换肤）
+ * render/theme.js · 和风视觉规范（阴阳师方向）
  *
- * 参考 QQ 农场那一类微信小游戏的观感：
- *   · 米白/奶油底 + 深棕描边，不用冷色玻璃
- *   · 按钮是「果冻块」：底部有厚度、顶部有高光、边缘有 2~3px 深色描边
- *   · 数字和标题用描边字，远看也清楚
+ * 深墨蓝底 + 描金细线 + 朱红印章 + 樱花点缀，
+ * 参考阴阳师的「夜庭院 / 探索」配色。所有界面都只从这里取色、
+ * 取形状，改风格只改这一个文件（其余模块写死的少量颜色同步改）。
  *
- * 所有界面都只从这里取色、取形状，改风格只改这一个文件。
+ * 接口保持向后兼容：T 上原有的字段名全部保留，只是换成和风色值，
+ * 这样 hud/sheet/codex/sell/modal 不用改结构就能整体换肤。
  * ============================================================ */
 
 var T = {
-    /* 线条与文字 */
-    ink: '#6b4423',
-    inkLight: '#a9845a',
-    text: '#5a3a1a',
-    textSoft: '#9a7a52',
-    textOnDark: '#fffdf5',
+    /* 线条与文字 —— 描金与浅金 */
+    ink: '#c8a45c',          /* 主描边：金 */
+    inkLight: '#8a6f3c',     /* 次级描边：暗金 */
+    text: '#e8d4a0',         /* 正文：浅金 */
+    textSoft: '#a4956e',     /* 次要文字：暗金 */
+    textOnDark: '#fff3d2',   /* 深底上的强调字 */
 
-    /* 卡片：奶油白 */
-    cardTop: '#fffdf6',
-    cardBottom: '#ffefd2',
-    cardDeep: 'rgba(140,98,52,0.28)',
+    /* 卡片：深墨牌匾（原奶油白） */
+    cardTop: '#263150',
+    cardBottom: '#1a2340',
+    cardDeep: 'rgba(6,10,24,0.55)',
 
-    /* 主按钮：蜂蜜黄 */
-    yellowTop: '#ffe977',
-    yellowBottom: '#ffb524',
-    yellowDeep: 'rgba(176,105,20,0.42)',
+    /* 主按钮：朱红印章（原蜂蜜黄） */
+    yellowTop: '#c55342',
+    yellowBottom: '#8f2f27',
+    yellowDeep: 'rgba(74,18,14,0.55)',
 
-    /* 次按钮：草绿 */
-    greenTop: '#a5e97a',
-    greenBottom: '#57b93c',
-    greenDeep: 'rgba(38,104,30,0.4)',
+    /* 次按钮：描金（原草绿） */
+    greenTop: '#d8b96e',
+    greenBottom: '#a8802f',
+    greenDeep: 'rgba(74,54,16,0.5)',
 
-    /* 禁用 / 未解锁 */
-    greyTop: '#efe6d2',
-    greyBottom: '#d8c9ab',
-    greyDeep: 'rgba(120,98,66,0.22)',
+    /* 禁用 / 未解锁：冷墨灰 */
+    greyTop: '#303a58',
+    greyBottom: '#232c46',
+    greyDeep: 'rgba(6,10,24,0.42)',
 
     /* 强调色 */
-    mint: '#3fb98a',
-    coral: '#ff8a5c',
-    sky: '#54c9ef',
+    mint: '#6fbf9e',
+    coral: '#c55342',
+    sky: '#7aa8cf',
 
-    /* M6：参考手游那种明快感 —— 外圈从木色换成天空色，
-     * 资源条和按钮改用「白底 + 深棕描边」，靠彩色徽章区分功能 */
-    skyTop: '#eaf9ff',
-    skyBottom: '#bee4f6',
-    badgeInk: '#8a5a2a'
+    /* 和风专用 */
+    gold: '#c8a45c',
+    goldLight: '#e8d4a0',
+    goldDeep: '#8a6f3c',
+    vermilion: '#a6332e',    /* 朱红印章 */
+    sakura: '#e8b8c4',       /* 樱花粉 */
+    night: '#141d33',        /* 深墨夜底 */
+    nightDeep: '#0e1426',    /* 更深的墨 */
+
+    /* 面板底色（原天空蓝） */
+    skyTop: '#263150',
+    skyBottom: '#1a2340',
+    badgeInk: '#c8a45c'
 };
 
 function rr(ctx, x, y, w, h, r) {
@@ -3667,7 +4138,7 @@ function rr(ctx, x, y, w, h, r) {
 }
 
 /**
- * 果冻块。opt:
+ * 牌匾块（原果冻块）。深底 + 金描边 + 淡金顶光。opt:
  *   top/bottom  渐变色
  *   deep        底部厚度色
  *   r           圆角
@@ -3704,7 +4175,7 @@ function jelly(ctx, x, y, w, h, opt) {
     if (opt.gloss !== false && h >= 26) {
         ctx.save();
         rr(ctx, x + w * 0.09, y + h * 0.1, w * 0.82, Math.max(6, h * 0.3), Math.min(h * 0.16, 9));
-        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.fillStyle = 'rgba(232,212,160,0.14)';
         ctx.fill();
         ctx.restore();
     }
@@ -3726,7 +4197,7 @@ function card(ctx, x, y, w, h, opt) {
 }
 
 /* 圆形徽章：底部按钮和顶部头像都用它。
- * 和果冻块的区别是「圆 + 一圈顶部高光」，这是手游图标位的标准画法。 */
+ * 深底上改成「金圈 + 淡金顶光」 */
 function badge(ctx, cx, cy, r, opt) {
     opt = opt || {};
 
@@ -3748,7 +4219,7 @@ function badge(ctx, cx, cy, r, opt) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(cx, cy - r * 0.2, r * 0.7, Math.PI * 1.15, Math.PI * 1.85);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.strokeStyle = 'rgba(232,212,160,0.34)';
         ctx.lineWidth = Math.max(2, r * 0.2);
         ctx.lineCap = 'round';
         ctx.stroke();
@@ -3756,12 +4227,12 @@ function badge(ctx, cx, cy, r, opt) {
     }
 }
 
-/* 描边字：Q 版标题常用，白字 + 深棕边 */
+/* 描边字：深底上用浅金字 + 深墨描边 */
 function textOutlined(ctx, txt, x, y, size, fill, ink, lw) {
     ctx.font = '800 ' + size + 'px sans-serif';
     if (ink !== null) {
         ctx.lineWidth = lw || Math.max(2, size * 0.18);
-        ctx.strokeStyle = ink || T.ink;
+        ctx.strokeStyle = ink || T.nightDeep;
         ctx.lineJoin = 'round';
         ctx.strokeText(txt, x, y);
     }
@@ -3769,7 +4240,7 @@ function textOutlined(ctx, txt, x, y, size, fill, ink, lw) {
     ctx.fillText(txt, x, y);
 }
 
-/* 普通正文（不带描边，深棕） */
+/* 普通正文（不带描边，浅金） */
 function text(ctx, txt, x, y, size, color, weight) {
     ctx.font = (weight || 600) + ' ' + size + 'px sans-serif';
     ctx.fillStyle = color || T.text;
@@ -3847,20 +4318,20 @@ function draw(ctx, modal) {
     if (!modal) return;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(58,38,18,0.5)';
+    ctx.fillStyle = 'rgba(6,10,24,0.68)';
     ctx.fillRect(0, 0, W, H);
 
     var c = cardRect(modal);
 
-    /* 卡片：奶油纸板 + 木色描边 + 柔和投影 */
+    /* 卡片：深墨牌匾 + 描金边 + 柔和投影 */
     ctx.save();
-    ctx.shadowColor = 'rgba(80,50,20,0.45)';
+    ctx.shadowColor = 'rgba(4,8,20,0.7)';
     ctx.shadowBlur = 22;
     ctx.shadowOffsetY = 8;
     roundRect(ctx, c.x, c.y, c.w, c.h, 24);
     var g = ctx.createLinearGradient(0, c.y, 0, c.y + c.h);
-    U.stop(g, 0, '#fffdf6');
-    U.stop(g, 1, '#ffeed0');
+    U.stop(g, 0, TT.cardTop);
+    U.stop(g, 1, TT.cardBottom);
     ctx.fillStyle = g;
     ctx.fill();
     ctx.restore();
@@ -3888,11 +4359,11 @@ function draw(ctx, modal) {
     ctx.lineJoin = 'round';
     ctx.font = '800 42px sans-serif';
     ctx.lineWidth = 7;
-    ctx.strokeStyle = 'rgba(140,88,20,0.85)';
+    ctx.strokeStyle = 'rgba(6,10,24,0.9)';
     ctx.strokeText(big, W / 2, c.y + 112);
     var gg = ctx.createLinearGradient(0, c.y + 86, 0, c.y + 134);
-    U.stop(gg, 0, '#fff3a8');
-    U.stop(gg, 1, '#f2a41a');
+    U.stop(gg, 0, '#f0d99a');
+    U.stop(gg, 1, '#c8a45c');
     ctx.fillStyle = gg;
     ctx.fillText(big, W / 2, c.y + 112);
 
@@ -3916,19 +4387,19 @@ function draw(ctx, modal) {
 
     ctx.font = '600 11.5px sans-serif';
     for (var i = 0; i < notes.length && i < 2; i++) {
-        ctx.fillStyle = modal.eaten > 0 && i === 0 ? '#c8441c'
-            : (modal.gain > 0 ? '#d98a2f' : TT.textSoft);
+        ctx.fillStyle = modal.eaten > 0 && i === 0 ? '#e06a55'
+            : (modal.gain > 0 ? '#e0bb6a' : TT.textSoft);
         ctx.fillText(notes[i], W / 2, c.y + 194 + i * 17);
     }
 
     /* 收下按钮 */
     var b = btnRect(modal);
     Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-        top: TT.greenTop, bottom: TT.greenBottom, deep: TT.greenDeep,
-        r: 24, depth: 5, ink: '#2f7a25', lw: 2.8
+        top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
+        r: 24, depth: 5, ink: '#5f1e18', lw: 2.8
     });
     ctx.lineJoin = 'round';
-    Th.textOutlined(ctx, '知道了', b.x + b.w / 2, b.y + b.h / 2, 17, '#ffffff', '#2b6b20', 3.2);
+    Th.textOutlined(ctx, '知道了', b.x + b.w / 2, b.y + b.h / 2, 17, '#fff3d2', '#5f1e18', 3.2);
 
     ctx.restore();
 }
@@ -3963,8 +4434,8 @@ module.exports = {
 
 var U = require('./util.js');
 
-var INK = '#3b2510';
-var INK_SOFT = 'rgba(59,37,16,0.72)';
+var INK = '#1a1526';
+var INK_SOFT = 'rgba(26,21,38,0.78)';
 
 /* 统一描边：细到 26px 也不糊，但要足够压住白色块 */
 function line(ctx, w) {
@@ -4063,7 +4534,7 @@ function auto(ctx, bg) {
     /* 轴孔填底色才像「洞」；用半透明墨色在深色块上会发灰 */
     ctx.beginPath();
     ctx.arc(0, 0, 0.145, 0, 6.2832);
-    ctx.fillStyle = bg || '#8a6d1f';
+    ctx.fillStyle = bg || '#8a6d2f';
     ctx.fill();
 }
 
@@ -4149,6 +4620,155 @@ function tank(ctx) {
     line(ctx, 0.065);
 }
 
+/* 招财贝壳：扇贝（扇形壳 + 放射肋 + 底部铰点）
+ * 关键是把「铰点」留在下方、壳面朝上张开 —— 倒过来会读成一把扇子 / 降落伞。
+ * 放射肋用深浅交替，26px 下仍能认出是贝壳而不是一块饼。 */
+function shell(ctx) {
+    /* 壳面：以底部铰点为圆心的扇形，张角略小于半圆 */
+    var cy = 0.34;
+    var R = 0.82;
+    var a0 = -Math.PI * 0.90;
+    var a1 = -Math.PI * 0.10;
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.arc(0, cy, R, a0, a1);
+    ctx.closePath();
+    white(ctx, 1);
+    line(ctx, 0.075);
+
+    /* 放射肋：从铰点扇出，裁进壳面不越界 */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.arc(0, cy, R, a0, a1);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    for (var i = 1; i < 7; i++) {
+        var a = a0 + (a1 - a0) * i / 7;
+        ctx.moveTo(0, cy + 0.02);
+        ctx.lineTo(Math.cos(a) * R, cy + Math.sin(a) * R);
+    }
+    ctx.strokeStyle = INK_SOFT;
+    ctx.lineWidth = 0.045;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.restore();
+
+    /* 底部铰点：一小块收口，扇贝的「根」 */
+    ctx.beginPath();
+    U.ellipse(ctx, 0, cy + 0.01, 0.13, 0.085, 0);
+    white(ctx, 1);
+    line(ctx, 0.065);
+}
+
+/* 鱼饵：一条弯成 S 的蚯蚓
+ * 不能用直线 —— 直条在 26px 下会被读成一根棍子 / 刀。
+ * 先描粗墨线再压一条白芯，「软体」的感觉就出来了。 */
+function bait(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(-0.24, -0.27);
+    ctx.bezierCurveTo(0.30, -0.34, -0.32, 0.08, 0.22, 0.14);
+    ctx.bezierCurveTo(0.34, 0.24, 0.00, 0.37, -0.22, 0.30);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.27;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+    ctx.lineWidth = 0.15;
+    ctx.stroke();
+
+    /* 头端一个墨点，读起来才是一条虫而不是一根绳 */
+    ctx.beginPath();
+    ctx.arc(-0.22, -0.28, 0.075, 0, 6.2832);
+    ctx.fillStyle = INK;
+    ctx.fill();
+}
+
+/* 珍珠贝：微张的贝 + 中间一颗珍珠
+ * 和「招财贝壳」区分开 —— 那个是规则扇贝，这个是圆肚牡蛎抱珠。 */
+function oyster(ctx) {
+    /* 一整片圆鼓的贝壳（不是上下两片叠着 —— 那样会读成一只眼睛），
+     * 顶部收成铰点、底部圆，中间抱一颗珍珠。 */
+    ctx.beginPath();
+    ctx.moveTo(0, -0.43);
+    ctx.bezierCurveTo(0.34, -0.41, 0.47, 0.02, 0.37, 0.33);
+    ctx.bezierCurveTo(0.23, 0.45, -0.23, 0.45, -0.37, 0.33);
+    ctx.bezierCurveTo(-0.47, 0.02, -0.34, -0.41, 0, -0.43);
+    ctx.closePath();
+    /* 壳用冷白（偏蓝），和中间的淡紫珍珠拉开层次，否则 28px 下糊成一团白 */
+    ctx.fillStyle = 'rgba(222,234,248,0.98)';
+    ctx.fill();
+    line(ctx, 0.075);
+
+    /* 放射纹：从顶部铰点扇开，裁进壳里 */
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, -0.43);
+    ctx.bezierCurveTo(0.34, -0.41, 0.47, 0.02, 0.37, 0.33);
+    ctx.bezierCurveTo(0.23, 0.45, -0.23, 0.45, -0.37, 0.33);
+    ctx.bezierCurveTo(-0.47, 0.02, -0.34, -0.41, 0, -0.43);
+    ctx.closePath();
+    ctx.clip();
+    ctx.beginPath();
+    for (var i = -2; i <= 2; i++) {
+        if (i === 0) continue;
+        ctx.moveTo(0, -0.40);
+        ctx.lineTo(i * 0.24, 0.46);
+    }
+    ctx.strokeStyle = 'rgba(26,21,38,0.30)';
+    ctx.lineWidth = 0.042;
+    ctx.stroke();
+    ctx.restore();
+
+    /* 珍珠：偏冷白 + 淡紫，和金色招财贝壳彻底分开 */
+    var g = ctx.createRadialGradient(-0.06, -0.04, 0.02, 0, 0.02, 0.19);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.5, '#e8ddfb');
+    g.addColorStop(1, '#9c7fc9');
+    ctx.beginPath();
+    ctx.arc(0, 0.02, 0.175, 0, 6.2832);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(90,66,140,0.75)';
+    ctx.lineWidth = 0.05;
+    ctx.stroke();
+}
+
+/* 珍珠：一颗圆珠，冷白 + 淡紫反光，左上一点高光 */
+function pearl(ctx) {
+    var g = ctx.createRadialGradient(-0.12, -0.14, 0.02, 0, 0, 0.42);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.55, '#f4eeff');
+    g.addColorStop(1, '#bfa9e0');
+    ctx.beginPath();
+    ctx.arc(0, 0, 0.40, 0, 6.2832);
+    ctx.fillStyle = g;
+    ctx.fill();
+    line(ctx, 0.07);
+
+    ctx.beginPath();
+    ctx.arc(-0.13, -0.15, 0.075, 0, 6.2832);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fill();
+}
+
+/* 系统：四宫格（代替原来的店铺图标） */
+function menu(ctx) {
+    var s = 0.30;
+    var gap = 0.10;
+    var pts = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+    for (var i = 0; i < pts.length; i++) {
+        var cx = pts[i][0] * (s + gap) / 2;
+        var cy = pts[i][1] * (s + gap) / 2;
+        U.roundRect(ctx, cx - s / 2, cy - s / 2, s, s, 0.06);
+        white(ctx, 1);
+        line(ctx, 0.065);
+    }
+}
+
 /* 金币：唯一一个「不白」的图标 —— 白圆加内圈在 28px 下会读成靶心，
  * 金币本身就该是金的，干脆直接上金色渐变，放在任何色底上都成立。 */
 function coin(ctx) {
@@ -4230,6 +4850,11 @@ var ART = {
     auto: auto,
     warehouse: warehouse,
     tank: tank,
+    shell: shell,
+    bait: bait,
+    oyster: oyster,
+    pearl: pearl,
+    menu: menu,
     coin: coin,
     shop: shop
 };
@@ -4315,7 +4940,7 @@ function drawSelection(ctx, state) {
 
     /* 价签 */
     var sp = fishLib.speciesById(f.speciesId);
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
     var txt = sp.name + ' · 卖 ' + wallet.format(price);
 
     ctx.save();
@@ -4326,8 +4951,8 @@ function drawSelection(ctx, state) {
     var by = f.y - r - 32;
 
     Th.jelly(ctx, bx, by, bw, 24, {
-        top: '#fffdf6', bottom: '#ffe6b0',
-        deep: 'rgba(150,100,40,0.30)',
+        top: TT.cardTop, bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 12, depth: 2, ink: TT.ink, lw: 2, gloss: false
     });
 
@@ -4351,20 +4976,20 @@ function drawSellButton(ctx, state) {
 
     if (!f) {
         Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-            top: '#fbf7ee',
-            bottom: '#efe5d2',
-            deep: 'rgba(140,98,52,0.2)',
+            top: '#263150',
+            bottom: '#1a2340',
+            deep: TT.cardDeep,
             r: 22,
             depth: 5,
-            ink: 'rgba(107,68,35,0.32)',
+            ink: 'rgba(200,164,92,0.4)',
             lw: 2.4,
             gloss: false
         });
 
         Th.badge(ctx, cx, cy, 19, {
-            top: '#f3ebdb',
-            bottom: '#d9cbb2',
-            ink: 'rgba(107,68,35,0.34)',
+            top: '#2c3858',
+            bottom: '#202a44',
+            ink: 'rgba(200,164,92,0.4)',
             lw: 2.2,
             gloss: false
         });
@@ -4377,7 +5002,7 @@ function drawSellButton(ctx, state) {
         ctx.beginPath();
         ctx.arc(cx, cy, 18.4, 0, 6.2832);
         ctx.clip();
-        ctx.fillStyle = 'rgba(244,238,226,0.74)';
+        ctx.fillStyle = 'rgba(38,49,80,0.78)';
         ctx.fill();
         ctx.restore();
 
@@ -4385,31 +5010,31 @@ function drawSellButton(ctx, state) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 13px sans-serif';
-        ctx.fillStyle = '#b6a486';
+        ctx.fillStyle = TT.textSoft;
         ctx.fillText('卖掉', cx, b.y + 61);
         ctx.restore();
         return;
     }
 
-    var price = fishLib.sellPriceOf(f);
+    var price = fishLib.sellPriceOf(f, state.shellLv);
 
     Th.jelly(ctx, b.x, b.y, b.w, b.h, {
-        top: '#ffe6a8',
-        bottom: '#ffc266',
-        deep: 'rgba(160,88,10,0.38)',
+        top: TT.yellowTop,
+        bottom: TT.yellowBottom,
+        deep: TT.yellowDeep,
         r: 22,
         depth: 5,
-        ink: '#8a4a10',
+        ink: '#5f1e18',
         lw: 2.6,
         gloss: false
     });
 
-    /* 徽章用浅米底而不是橙色：金色金币压在橙底上会糊成一团，
-     * 换成浅底，金币的轮廓和中间的星才立得住。 */
+    /* 徽章用深墨底：金色金币压在朱红底上会糊成一团，
+     * 换成深底，金币的轮廓和中间的星才立得住。 */
     Th.badge(ctx, cx, cy, 19, {
-        top: '#fffdf2',
-        bottom: '#ffe7b8',
-        ink: '#8a4a10',
+        top: '#2a3352',
+        bottom: '#1a2340',
+        ink: TT.gold,
         lw: 2.4
     });
 
@@ -4419,7 +5044,7 @@ function drawSellButton(ctx, state) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 14px sans-serif';
-    ctx.fillStyle = '#7d3f08';
+    ctx.fillStyle = '#fff3d2';
     ctx.fillText('+' + wallet.format(price), cx, b.y + 61);
     ctx.restore();
 }
@@ -4550,7 +5175,7 @@ function draw(ctx, session, state) {
     ctx.font = '400 11px sans-serif';
     ctx.fillStyle = '#5f8497';
     var value = 0;
-    for (var i = 0; i < state.fish.length; i++) value += fishLib.sellPriceOf(state.fish[i]);
+    for (var i = 0; i < state.fish.length; i++) value += fishLib.sellPriceOf(state.fish[i], state.shellLv);
     ctx.fillText('全缸身价 ' + wallet.format(value) + ' · 鱼 ' + state.fish.length +
         ' 条 · 账本 ' + state.ledger.length + ' 条', p.x + 14, p.y + PH - 12);
 }
@@ -4652,6 +5277,253 @@ module.exports = {
     panelRect: panelRect,
     btnRect: btnRect,
     closeRect: closeRect
+};
+
+  };
+
+  defs["core/pond.js"] = function (module, exports, require) {
+/* ============================================================
+ * core/pond.js · 鱼塘 / 钓鱼 / 仓库（纯逻辑，不碰 canvas）
+ *
+ * 一条完整的钓鱼线：
+ *   商店买鱼饵（10/个） → 鱼塘抛竿（扣 1 鱼饵）
+ *     ├─ 85% 出鱼（按鱼塘等级抽鱼种，成长随机，偏小）
+ *     └─ 15% 出珍珠贝（进仓库）
+ *   仓库里：鱼可以「放进鱼缸」或「直接卖掉」；
+ *           珍珠贝「打破」50% 得珍珠；珍珠卖 1 万。
+ *
+ * 为什么钓上来的鱼不直接进缸：
+ *   鱼缸有鱼位上限，钓到大鱼时如果缸满了会很扫兴，
+ *   所以先落在仓库，玩家自己决定是放缸养大还是当场变现。
+ *
+ * 数值全部来自 config/pond.js，这里不写死。
+ * ============================================================ */
+
+var cfg = require('../config/index.js');
+var wallet = require('./wallet.js');
+var fishLib = require('./fish.js');
+var storage = require('./storage.js');
+var codex = require('./codex.js');
+
+function P() { return cfg.pond; }
+
+/* ---------------- 计数读取 ---------------- */
+
+function baitOf(state) { return Math.max(0, (state.bag && state.bag.bait) || 0); }
+function oysterOf(state) { return Math.max(0, (state.bag && state.bag.oyster) || 0); }
+function pearlOf(state) { return Math.max(0, (state.bag && state.bag.pearl) || 0); }
+function caughtCount(state) { return (state.caught || []).length; }
+
+/* ---------------- 鱼塘等级 ---------------- */
+
+function levelCfg(lv) {
+    var list = P().levels || [];
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].lv === lv) return list[i];
+    }
+    return list[0] || { lv: 1, name: '普通鱼塘', rarity: 'R' };
+}
+
+function curLevel(state) {
+    return levelCfg(state.pondLv || 1);
+}
+
+/* 该鱼塘能钓到的鱼池：同稀有度、排除秘密鱼（小鲨鱼只能开卵/传奇卵拿） */
+function poolOf(state) {
+    var L = curLevel(state);
+    var out = [];
+    for (var i = 0; i < cfg.species.length; i++) {
+        var sp = cfg.species[i];
+        if (sp.secret) continue;
+        if (sp.rarity !== L.rarity) continue;
+        out.push(sp);
+    }
+    return out;
+}
+
+/* 按权重从鱼池抽一条（档内加权，和买卵同一套权重） */
+function rollFish(state) {
+    var pool = poolOf(state);
+    if (!pool.length) return null;
+    var total = 0;
+    var i;
+    for (i = 0; i < pool.length; i++) total += pool[i].drawWeight || 1;
+    var r = Math.random() * total;
+    var acc = 0;
+    for (i = 0; i < pool.length; i++) {
+        acc += pool[i].drawWeight || 1;
+        if (r <= acc) return pool[i];
+    }
+    return pool[pool.length - 1];
+}
+
+/* 随机成长：exp > 1 时偏小，大鱼稀有 */
+function rollGrowth() {
+    var G = P().growth || { min: 8, max: 100, exp: 1 };
+    var t = Math.pow(Math.random(), G.exp);
+    return G.min + (G.max - G.min) * t;
+}
+
+/* ---------------- 鱼饵 ---------------- */
+
+function baitPrice() { return (P().bait && P().bait.price) || 10; }
+
+/* 买 n 个鱼饵：一次性扣钱、一次性入库 */
+function buyBait(state, n) {
+    n = Math.max(1, Math.floor(n || 1));
+    var cost = baitPrice() * n;
+    if (!wallet.canAfford(state, 'fish', cost)) {
+        return { ok: false, reason: 'poor', cost: cost };
+    }
+    wallet.spend(state, 'fish', cost, 'bait:' + n);
+    state.bag.bait = baitOf(state) + n;
+    return { ok: true, n: n, cost: cost, total: baitOf(state) };
+}
+
+/* ---------------- 抛竿 ---------------- */
+
+/**
+ * 钓一次。返回：
+ *   { ok:false, reason:'no_bait' }              没鱼饵
+ *   { ok:false, reason:'no_pool' }              该塘没有可钓的鱼
+ *   { ok:true, type:'oyster', total }           钓到珍珠贝
+ *   { ok:true, type:'fish', species, fish, total } 钓到鱼
+ */
+function cast(state) {
+    if (baitOf(state) < ((P().bait && P().bait.perCatch) || 1)) {
+        return { ok: false, reason: 'no_bait' };
+    }
+    var sp = rollFish(state);
+    if (!sp) return { ok: false, reason: 'no_pool' };
+
+    state.bag.bait = baitOf(state) - ((P().bait && P().bait.perCatch) || 1);
+
+    /* 先判珍珠贝，剩下的都是鱼 */
+    if (Math.random() < (P().oysterRate || 0)) {
+        state.bag.oyster = oysterOf(state) + 1;
+        return { ok: true, type: 'oyster', total: oysterOf(state) };
+    }
+
+    var f = fishLib.create(sp.id, { growth: rollGrowth() });
+    state.caught.push(f);
+    codex.mark(state, sp.id);   /* 钓到就算图鉴收录过 */
+    return { ok: true, type: 'fish', species: sp, fish: f, total: caughtCount(state) };
+}
+
+/* ---------------- 珍珠贝 / 珍珠 ---------------- */
+
+/* 打破一个珍珠贝：50% 出珍珠，否则空手（壳碎掉） */
+function breakOyster(state) {
+    if (oysterOf(state) <= 0) return { ok: false, reason: 'none' };
+    state.bag.oyster = oysterOf(state) - 1;
+    if (Math.random() < (P().oysterBreakRate || 0.5)) {
+        state.bag.pearl = pearlOf(state) + 1;
+        return { ok: true, pearl: true, pearls: pearlOf(state) };
+    }
+    return { ok: true, pearl: false, pearls: pearlOf(state) };
+}
+
+/* 卖一颗珍珠：固定 1 万 */
+function sellPearl(state) {
+    if (pearlOf(state) <= 0) return { ok: false, reason: 'none' };
+    var price = P().pearlPrice || 10000;
+    state.bag.pearl = pearlOf(state) - 1;
+    wallet.add(state, 'fish', price, 'sell:pearl');
+    return { ok: true, price: price };
+}
+
+/* ---------------- 仓库里的鱼 ---------------- */
+
+/* 仓库鱼 → 鱼缸：找得到空位才搬，找不到返回 full */
+function moveToTank(state, fishId) {
+    var idx = -1;
+    var i;
+    for (i = 0; i < state.caught.length; i++) {
+        if (state.caught[i].id === fishId) { idx = i; break; }
+    }
+    if (idx < 0) return { ok: false, reason: 'gone' };
+
+    var slot = storage.firstRoomTank(state);
+    if (slot < 0) return { ok: false, reason: 'full' };
+
+    var f = state.caught.splice(idx, 1)[0];
+    f.tank = slot;
+    /* 仓库里的鱼没有坐标，进缸后交给 ensurePlacement 摆位 */
+    f.x = 0;
+    f.y = 0;
+    state.fish.push(f);
+    return { ok: true, tank: slot };
+}
+
+/* 仓库鱼直接卖：和缸里卖鱼同价（含招财贝壳加成） */
+function sellCaught(state, fishId) {
+    var idx = -1;
+    for (var i = 0; i < state.caught.length; i++) {
+        if (state.caught[i].id === fishId) { idx = i; break; }
+    }
+    if (idx < 0) return { ok: false, reason: 'gone' };
+
+    var f = state.caught.splice(idx, 1)[0];
+    var price = fishLib.sellPriceOf(f, state.shellLv);
+    wallet.add(state, 'fish', price, 'sell:' + f.speciesId);
+    return { ok: true, price: price };
+}
+
+/* 仓库鱼列表（带卖价、名字、大小标签） */
+function caughtList(state) {
+    var out = [];
+    var list = state.caught || [];
+    for (var i = 0; i < list.length; i++) {
+        var f = list[i];
+        var sp = fishLib.speciesById(f.speciesId);
+        out.push({
+            fish: f,
+            species: sp,
+            price: fishLib.sellPriceOf(f, state.shellLv),
+            stage: fishLib.stageName(fishLib.stageOf(f.growth)),
+            growth: Math.round(f.growth)
+        });
+    }
+    return out;
+}
+
+/* 鱼塘页要展示的全部状态 */
+function statusOf(state) {
+    var L = curLevel(state);
+    var bait = baitOf(state);
+    var pool = poolOf(state);
+    return {
+        lv: state.pondLv || 1,
+        name: L.name,
+        rarity: L.rarity,
+        poolCount: pool.length,
+        bait: bait,
+        canCast: bait > 0 && pool.length > 0,
+        oysterRate: P().oysterRate || 0,
+        pearlPrice: P().pearlPrice || 10000,
+        caught: caughtCount(state),
+        oyster: oysterOf(state),
+        pearl: pearlOf(state)
+    };
+}
+
+module.exports = {
+    baitOf: baitOf,
+    oysterOf: oysterOf,
+    pearlOf: pearlOf,
+    caughtCount: caughtCount,
+    levelCfg: levelCfg,
+    curLevel: curLevel,
+    poolOf: poolOf,
+    baitPrice: baitPrice,
+    buyBait: buyBait,
+    cast: cast,
+    breakOyster: breakOyster,
+    sellPearl: sellPearl,
+    moveToTank: moveToTank,
+    sellCaught: sellCaught,
+    caughtList: caughtList,
+    statusOf: statusOf
 };
 
   };
@@ -5048,9 +5920,12 @@ var modalRender = require('../render/modal.js');
 var sellRender = require('../render/sell.js');
 var debugPanel = require('./debug-panel.js');
 var shop = require('../core/shop.js');
+var pondCore = require('../core/pond.js');
 var storage = require('../core/storage.js');
 var fishLib = require('../core/fish.js');
 var wallet = require('../core/wallet.js');
+var platform = require('../platform.js');
+var cfg = require('../config/index.js');
 var view = require('./view.js');
 
 /* 点到了哪条鱼：命中半径比视觉尺寸小一圈，避免点水面撒食时误选 */
@@ -5116,6 +5991,18 @@ function handleSheet(x, y, env) {
     var state = env.state;
     var ease = session.sheetEase;
 
+    /* 图鉴详情浮层：吞掉面板内的一切点击，直到关闭 */
+    if (session.codexDetail != null) {
+        var d = L.codexDetailRect(ease);
+        if (U.inRect(x, y, L.codexDetailClose(d))) {
+            session.codexDetail = null;
+            return;
+        }
+        /* 点卡片外面也关掉；点卡片本体什么都不做 */
+        if (!U.inRect(x, y, d)) session.codexDetail = null;
+        return;
+    }
+
     if (U.inRect(x, y, L.closeRect(ease))) {
         session.sheetOpen = false;
         return;
@@ -5126,12 +6013,105 @@ function handleSheet(x, y, env) {
         return;
     }
 
-    /* 切换页签：道具 / 鱼卵 */
-    for (var t = 0; t < 2; t++) {
+    /* 切换页签：商店 / 鱼卵 / 图鉴 / 鱼塘 / 仓库 */
+    for (var t = 0; t < 5; t++) {
         if (U.inRect(x, y, L.tabRect(t, ease))) {
             session.sheetTab = t;
+            session.codexDetail = null;
+            session.bagSel = '';
             return;
         }
+    }
+
+    /* 鱼塘页：抛竿 */
+    if (session.sheetTab === 3) {
+        if (U.inRect(x, y, L.pondCastRect(ease))) {
+            /* 连点冷却：cd 内直接吞掉，避免一划手指连钓十次 */
+            var cd = ((cfg.pond.castCooldown || 0.5) * 1000);
+            var now = platform.now();
+            if (session.pondTapAt && now - session.pondTapAt < cd) return;
+            session.pondTapAt = now;
+
+            var cr = pondCore.cast(state);
+            if (!cr.ok) {
+                if (cr.reason === 'no_bait') session.showToast('鱼饵不足，去商店买');
+                else session.showToast('这个鱼塘暂时没鱼可钓');
+                return;
+            }
+            if (cr.type === 'oyster') {
+                session.showToast('钓到珍珠贝！去仓库打破');
+            } else {
+                session.showToast('钓到 ' + cr.species.name + ' · ' + Math.round(cr.fish.growth) + '%');
+            }
+            return;
+        }
+        return;
+    }
+
+    /* 仓库页：道具行 → 操作栏 → 鱼格 */
+    if (session.sheetTab === 4) {
+        var bagSt = pondCore.statusOf(state);
+
+        if (U.inRect(x, y, L.bagItemRect(0, ease))) {
+            var br = pondCore.breakOyster(state);
+            if (!br.ok) session.showToast('没有珍珠贝');
+            else session.showToast(br.pearl ? '开出珍珠！' : '空壳，什么也没有');
+            return;
+        }
+        if (U.inRect(x, y, L.bagItemRect(1, ease))) {
+            var pr = pondCore.sellPearl(state);
+            if (!pr.ok) session.showToast('没有珍珠');
+            else session.showToast('珍珠卖出 +' + wallet.format(pr.price));
+            return;
+        }
+        if (U.inRect(x, y, L.bagItemRect(2, ease))) {
+            session.showToast('鱼饵 ×' + bagSt.bait + ' · 去商店补充');
+            return;
+        }
+
+        if (session.bagSel) {
+            if (U.inRect(x, y, L.bagActionRect(0, ease))) {
+                var mv = pondCore.moveToTank(state, session.bagSel);
+                if (!mv.ok) {
+                    session.showToast(mv.reason === 'full' ? '鱼缸满了，先清出鱼位' : '这条鱼已经不在了');
+                } else {
+                    session.bagSel = '';
+                    session.showToast('已放进鱼缸');
+                }
+                return;
+            }
+            if (U.inRect(x, y, L.bagActionRect(1, ease))) {
+                var sc = pondCore.sellCaught(state, session.bagSel);
+                if (!sc.ok) session.showToast('这条鱼已经不在了');
+                else {
+                    session.bagSel = '';
+                    session.showToast('卖掉 +' + wallet.format(sc.price));
+                }
+                return;
+            }
+        }
+
+        var cells = pondCore.caughtList(state);
+        var maxShow = L.BAG_COLS * L.BAG_ROWS;
+        for (var ci = 0; ci < cells.length && ci < maxShow; ci++) {
+            if (U.inRect(x, y, L.bagFishRect(ci, ease))) {
+                session.bagSel = session.bagSel === cells[ci].fish.id ? '' : cells[ci].fish.id;
+                return;
+            }
+        }
+        return;
+    }
+
+    /* 图鉴页：点任意格子看详情 */
+    if (session.sheetTab === 2) {
+        var entries = require('../core/codex.js').list(state);
+        for (var c = 0; c < entries.length; c++) {
+            if (U.inRect(x, y, L.codexRect(c, ease))) {
+                session.codexDetail = c;
+                return;
+            }
+        }
+        return;
     }
 
     /* 鱼卵页：只卖三档品质，整张卡片都算买（点哪都是抽） */
@@ -5249,6 +6229,8 @@ function tap(x, y, env) {
     }
     if (U.inRect(x, y, L.SHOP_BTN)) {
         session.sheetOpen = true;
+        session.codexDetail = null;
+        session.bagSel = '';
         return;
     }
 
@@ -5478,17 +6460,18 @@ module.exports = {
 var U = require('./util.js');
 var fishLib = require('../core/fish.js');
 
-/* 8 套配色：[主色, 暗部色]，索引对应 config/species.js 的 palette */
+/* 9 套和风配色：[主色, 暗部色]，索引对应 config/species.js 的 palette。
+ * 阴阳师方向：锦鲤红白、黄金、墨、绯、紫藤、青瓷 —— 形体仍是 Q 版。 */
 var PALETTE = [
-    ['#ffd479', '#ef7d34'],   /* 0 金 */
-    ['#a8ecf7', '#2f9fc4'],   /* 1 蓝 */
-    ['#ffc2da', '#e86b9e'],   /* 2 粉 */
-    ['#ffe97a', '#e3a018'],   /* 3 亮黄 */
-    ['#c3b4ff', '#7256d6'],   /* 4 紫 */
-    ['#8ff2c8', '#18a97a'],   /* 5 青绿 */
-    ['#ff9e94', '#d8443c'],   /* 6 红 */
-    ['#eaf2f7', '#8fa9b8'],   /* 7 白 */
-    ['#b9ccd8', '#54768e']    /* 8 鲨鱼灰蓝 */
+    ['#f2c15a', '#b8701f'],   /* 0 黄金（小金鱼） */
+    ['#9fd8e8', '#2f7f9e'],   /* 1 青瓷蓝（蓝泡泡 / 幽蓝斗鱼） */
+    ['#ffd2d8', '#d96a86'],   /* 2 樱粉（桃花鲤） */
+    ['#f7d878', '#c08a1c'],   /* 3 金（金灯 / 金龙） */
+    ['#c9b6ee', '#6f52b4'],   /* 4 紫藤（紫罗兰） */
+    ['#a8e0c4', '#1f8f72'],   /* 5 青（备用） */
+    ['#f4a08e', '#b83a2e'],   /* 6 绯红（朱锦鲤 / 红箭） */
+    ['#eef2f4', '#8a9bab'],   /* 7 白（备用） */
+    ['#b9c6d2', '#4a6276']    /* 8 鲨鱼墨灰 */
 ];
 
 /* 每个物种的外形参数
@@ -5533,9 +6516,9 @@ function mix(c1, c2, t) {
         Math.round(x[2] + (y[2] - x[2]) * t) + ')';
 }
 
-/* 描边色：往暖棕压暗，比纯黑柔和，和界面描边同一族 */
+/* 描边色：往深墨压暗，比纯黑柔和，和和风界面描边同一族 */
 function inkOf(c) {
-    return mix(c, '#2e1a0c', 0.62);
+    return mix(c, '#1a1526', 0.66);
 }
 
 /* ---------------- 形状 ---------------- */
@@ -5993,9 +6976,9 @@ var BOT = C.TANK_BOTTOM;
 function drawSurface(ctx, t) {
     var h = 30;
     var g = ctx.createLinearGradient(0, TOP, 0, TOP + h * 1.9);
-    U.stop(g, 0, 'rgba(255,255,255,0.34)');
-    U.stop(g, 0.45, 'rgba(255,255,255,0.12)');
-    U.stop(g, 1, 'rgba(200,248,255,0)');
+    U.stop(g, 0, 'rgba(232,212,160,0.20)');
+    U.stop(g, 0.45, 'rgba(232,212,160,0.08)');
+    U.stop(g, 1, 'rgba(232,212,160,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(0, TOP - 2);
@@ -6014,7 +6997,7 @@ function drawSurface(ctx, t) {
         var y2 = TOP + h + Math.sin(x2 * 0.021 + t * 1.7) * 4.5 + Math.sin(x2 * 0.047 - t * 1.15) * 2.4;
         if (x2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
     }
-    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.strokeStyle = 'rgba(232,212,160,0.55)';
     ctx.lineWidth = 2.2;
     ctx.stroke();
     ctx.restore();
@@ -6044,9 +7027,9 @@ function drawLightBeams(ctx, t) {
             var fade = 1 - Math.abs(k) * 0.34;
             var x = cx + k * width * 0.9;
             var g = ctx.createLinearGradient(x, TOP, x + 110, BOT);
-            U.stop(g, 0, 'rgba(255,255,255,' + 0.075 * fade + ')');
-            U.stop(g, 0.5, 'rgba(255,255,255,' + 0.035 * fade + ')');
-            U.stop(g, 1, 'rgba(255,255,255,0)');
+            U.stop(g, 0, 'rgba(200,164,92,' + 0.09 * fade + ')');
+            U.stop(g, 0.5, 'rgba(200,164,92,' + 0.04 * fade + ')');
+            U.stop(g, 1, 'rgba(200,164,92,0)');
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.moveTo(x - width * 0.6, TOP);
@@ -6062,7 +7045,7 @@ function drawLightBeams(ctx, t) {
 
 function drawMotes(ctx, decor) {
     ctx.save();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#e8d4a0';
     for (var i = 0; i < decor.motes.length; i++) {
         var m = decor.motes[i];
         ctx.globalAlpha = m.a;
@@ -6087,9 +7070,9 @@ function drawPlants(ctx, decor, t, layer) {
         ctx.globalAlpha = alpha;
 
         var g = ctx.createLinearGradient(0, ground, 0, ground - p.h);
-        U.stop(g, 0, U.hsl(p.hue, 66, 34));
-        U.stop(g, 1, U.hsl(p.hue, 84, 58));
-        ctx.fillStyle = g || U.hsl(p.hue, 70, 42);
+        U.stop(g, 0, U.hsl(p.hue, 48, 26));
+        U.stop(g, 1, U.hsl(p.hue, 58, 46));
+        ctx.fillStyle = g || U.hsl(p.hue, 52, 34);
 
         ctx.beginPath();
         ctx.moveTo(p.x - p.w * 0.5, ground + 2);
@@ -6098,7 +7081,7 @@ function drawPlants(ctx, decor, t, layer) {
         ctx.closePath();
         ctx.fill();
         /* 深绿细描边：卡通风格靠描边立住轮廓 */
-        ctx.strokeStyle = 'rgba(26,88,48,0.55)';
+        ctx.strokeStyle = 'rgba(6,20,16,0.6)';
         ctx.lineWidth = 1.3;
         ctx.stroke();
 
@@ -6115,9 +7098,9 @@ function drawPlants(ctx, decor, t, layer) {
 
 function drawGround(ctx, decor) {
     var g = ctx.createLinearGradient(0, ground - 20, 0, BOT);
-    U.stop(g, 0, '#fff0c6');
-    U.stop(g, 0.35, '#f3dca6');
-    U.stop(g, 1, '#dbb97c');
+    U.stop(g, 0, '#3a4a63');
+    U.stop(g, 0.35, '#28374e');
+    U.stop(g, 1, '#1a263a');
     ctx.fillStyle = g;
 
     ctx.beginPath();
@@ -6135,15 +7118,15 @@ function drawGround(ctx, decor) {
         ctx.save();
         ctx.globalAlpha = 0.85;
         var gg = ctx.createLinearGradient(p.x, ground + p.dy - p.r, p.x, ground + p.dy + p.r);
-        U.stop(gg, 0, '#fff3d4');
-        U.stop(gg, 1, '#c2a06a');
+        U.stop(gg, 0, '#51617c');
+        U.stop(gg, 1, '#2b3a52');
         ctx.fillStyle = gg;
         ctx.beginPath();
         U.ellipse(ctx, p.x, ground + p.dy + 3, p.r, p.r * 0.62, 0);
         ctx.fill();
 
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = '#c8a45c';
         ctx.beginPath();
         U.ellipse(ctx, p.x - p.r * 0.24, ground + p.dy - p.r * 0.1, p.r * 0.4, p.r * 0.22, -0.3);
         ctx.fill();
@@ -6166,14 +7149,14 @@ function drawCorals(ctx, decor, t) {
             var ex = Math.cos(a) * b.len;
             var ey = Math.sin(a) * b.len;
 
-            ctx.strokeStyle = U.hsl(c.hue, 68, 56);
+            ctx.strokeStyle = U.hsl(c.hue, 52, 44);
             ctx.lineWidth = b.w;
             ctx.beginPath();
             ctx.moveTo(0, 0);
             ctx.quadraticCurveTo(ex * 0.35, ey * 0.62, ex, ey);
             ctx.stroke();
 
-            ctx.fillStyle = U.hsl(c.hue, 78, 70);
+            ctx.fillStyle = U.hsl(c.hue, 66, 60);
             ctx.beginPath();
             ctx.arc(ex, ey, b.w * 0.62, 0, 6.2832);
             ctx.fill();
@@ -6223,12 +7206,45 @@ function drawBubbles(ctx, state) {
     ctx.restore();
 }
 
+/* ---------------- 樱花飘落 ----------------
+ * 纯视觉：位置由 t 与固定相位算出，不需要逻辑层存状态。
+ * 花瓣画成一片带小缺口的椭圆，半透明，缓缓下落并左右摇。 */
+var SAKURA_N = 12;
+function drawSakura(ctx, t) {
+    ctx.save();
+    for (var i = 0; i < SAKURA_N; i++) {
+        var seed = i * 7.31;
+        var speed = 16 + (i % 4) * 6;                    /* 下落速度错开 */
+        var span = BOT - TOP + 40;
+        var yy = TOP - 20 + ((seed * 11 + t * speed) % span);
+        var xx = 18 + ((seed * 37) % (W - 36)) + Math.sin(t * 0.8 + seed) * 14;
+        var scale = 0.7 + (i % 3) * 0.22;
+        var spin = t * 0.9 + seed;
+        var alpha = 0.30 + (i % 3) * 0.12;
+
+        ctx.save();
+        ctx.translate(xx, yy);
+        ctx.rotate(spin);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#e8b8c4';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(-4.5, -3.2, -4.0, -8.5, 0, -7.0);
+        ctx.bezierCurveTo(4.0, -8.5, 4.5, -3.2, 0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+    ctx.restore();
+}
+
 /* 三个缸各自一套背景色调，切缸时一眼能看出换了地方。
  * 差异克制在「同一个水族馆的不同缸」，不做成三个画风。 */
 var TANK_THEME = [
-    ['#d7f9ff', '#8fe4f4', '#41c1da', '#2589a6'],
-    ['#d3fbf0', '#8ce4d2', '#3fb9ba', '#238a99'],
-    ['#dcf3ff', '#94d8f4', '#4cb4e0', '#2680aa']
+    ['#1b3a5e', '#162f4c', '#11253f', '#0d1a30'],  /* 靛蓝庭院 */
+    ['#173f42', '#133538', '#0e2a2c', '#0a1d20'],  /* 墨绿庭院 */
+    ['#28365c', '#1f2c4d', '#17223e', '#101930']   /* 紫墨庭院 */
 ];
 
 /* 场景总绘：按深度顺序铺一遍 */
@@ -6261,6 +7277,7 @@ function draw(ctx, state, decor) {
     drawFoods(ctx, state);
     fishRender.drawAll(ctx, state);
     drawBubbles(ctx, state);
+    drawSakura(ctx, t);
 
     ctx.restore();
 }
@@ -6301,7 +7318,8 @@ var TOP = C.TANK_TOP;
 var BOT = C.TANK_BOTTOM;
 var FX = C.FRAME_X;
 
-var WOOD = '#6b4423';
+var WOOD = '#c8a45c';       /* 描金 */
+var LINE = 'rgba(200,164,92,'; /* 金线前缀（和风描边） */
 var CARD_X = 5;
 
 /* ---------------- 外轮廓 ---------------- */
@@ -6318,9 +7336,9 @@ function drawCard(ctx) {
     ctx.closePath();
 
     var g = ctx.createLinearGradient(0, 0, 0, H);
-    U.stop(g, 0, '#fffefa');
-    U.stop(g, 0.5, '#fdf5e4');
-    U.stop(g, 1, '#f9ebcd');
+    U.stop(g, 0, '#202a48');
+    U.stop(g, 0.5, '#18213c');
+    U.stop(g, 1, '#111a30');
     ctx.fillStyle = g;
     ctx.fill();
 
@@ -6335,7 +7353,7 @@ function hair(ctx, y, alpha) {
     ctx.beginPath();
     ctx.moveTo(CARD_X + 1, y);
     ctx.lineTo(W - CARD_X - 1, y);
-    ctx.strokeStyle = 'rgba(107,68,35,' + alpha + ')';
+    ctx.strokeStyle = LINE + alpha + ')';
     ctx.lineWidth = 1.7;
     ctx.stroke();
 }
@@ -6348,7 +7366,7 @@ function drawWalls(ctx) {
         ctx.beginPath();
         ctx.moveTo(x, TOP);
         ctx.lineTo(x, BOT);
-        ctx.strokeStyle = 'rgba(107,68,35,0.62)';
+        ctx.strokeStyle = LINE + '0.62)';
         ctx.lineWidth = 1.7;
         ctx.stroke();
     }
@@ -6359,27 +7377,27 @@ function drawWalls(ctx) {
 /* 水面被缸盖压住、沙底被缸底托住，两道影让水看着是「装在里面」的 */
 function drawGlassShade(ctx) {
     var g = ctx.createLinearGradient(0, TOP, 0, TOP + 14);
-    U.stop(g, 0, 'rgba(16,64,84,0.19)');
-    U.stop(g, 1, 'rgba(16,64,84,0)');
+    U.stop(g, 0, 'rgba(6,10,28,0.30)');
+    U.stop(g, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g;
     ctx.fillRect(FX, TOP, W - FX * 2, 14);
 
     var g2 = ctx.createLinearGradient(0, BOT - 16, 0, BOT);
-    U.stop(g2, 0, 'rgba(16,64,84,0)');
-    U.stop(g2, 1, 'rgba(16,64,84,0.15)');
+    U.stop(g2, 0, 'rgba(6,10,28,0)');
+    U.stop(g2, 1, 'rgba(6,10,28,0.26)');
     ctx.fillStyle = g2;
     ctx.fillRect(FX, BOT - 16, W - FX * 2, 16);
 
     /* 贴着缸壁的一窄条暗，玻璃厚度就出来了 */
     var g3 = ctx.createLinearGradient(FX, 0, FX + 9, 0);
-    U.stop(g3, 0, 'rgba(16,64,84,0.14)');
-    U.stop(g3, 1, 'rgba(16,64,84,0)');
+    U.stop(g3, 0, 'rgba(6,10,28,0.22)');
+    U.stop(g3, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g3;
     ctx.fillRect(FX, TOP, 9, BOT - TOP);
 
     var g4 = ctx.createLinearGradient(W - FX, 0, W - FX - 9, 0);
-    U.stop(g4, 0, 'rgba(16,64,84,0.14)');
-    U.stop(g4, 1, 'rgba(16,64,84,0)');
+    U.stop(g4, 0, 'rgba(6,10,28,0.22)');
+    U.stop(g4, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g4;
     ctx.fillRect(W - FX - 9, TOP, 9, BOT - TOP);
 }
@@ -6407,8 +7425,8 @@ function drawGlare(ctx) {
  * 屏幕边缘这几个像素不铺满，真机上会留下上一帧的残影。 */
 function base(ctx) {
     var wall = ctx.createLinearGradient(0, 0, 0, H);
-    U.stop(wall, 0, '#f3e0ba');
-    U.stop(wall, 1, '#dcbe8e');
+    U.stop(wall, 0, '#101830');
+    U.stop(wall, 1, '#080d1e');
     ctx.fillStyle = wall;
     ctx.fillRect(0, 0, W, H);
 
@@ -6480,18 +7498,18 @@ function drawCoin(ctx, cx, cy, r) {
 
 function drawCoinBlue(ctx, cx, cy, r) {
     var g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.4, 1, cx, cy, r);
-    U.stop(g, 0, '#d9f6ff');
-    U.stop(g, 0.55, '#4dc1ea');
-    U.stop(g, 1, '#1b7ba3');
+    U.stop(g, 0, '#cfe4f2');
+    U.stop(g, 0.55, '#6f9fc4');
+    U.stop(g, 1, '#2c5677');
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, 6.2832);
     ctx.fillStyle = g;
     ctx.fill();
-    ctx.strokeStyle = '#12658a';
+    ctx.strokeStyle = '#24486a';
     ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    ctx.fillStyle = '#eafaff';
+    ctx.fillStyle = '#e8f2fa';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 9px sans-serif';
@@ -6530,9 +7548,9 @@ function drawPlayerCard(ctx, state) {
     var c = L.CARD;
 
     Th.jelly(ctx, c.x, c.y, c.w, c.h, {
-        top: '#ffffff',
-        bottom: '#f8ead1',
-        deep: 'rgba(140,98,52,0.24)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 18,
         depth: 3,
         ink: TT.ink,
@@ -6544,7 +7562,7 @@ function drawPlayerCard(ctx, state) {
     var a = L.AVATAR;
     ctx.beginPath();
     ctx.arc(a.cx, a.cy, a.r + 3, 0, 6.2832);
-    ctx.fillStyle = '#fff6e2';
+    ctx.fillStyle = '#2a3352';
     ctx.fill();
     ctx.strokeStyle = TT.ink;
     ctx.lineWidth = 2.2;
@@ -6564,16 +7582,16 @@ function drawPlayerCard(ctx, state) {
     var tk = storage.activeTankOf(state) + 1;
     ctx.beginPath();
     ctx.arc(a.cx + a.r - 3, a.cy + a.r - 3, 9, 0, 6.2832);
-    ctx.fillStyle = '#ff9f3d';
+    ctx.fillStyle = TT.vermilion;
     ctx.fill();
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = TT.goldLight;
     ctx.lineWidth = 2;
     ctx.stroke();
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 11px sans-serif';
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#fff3d2';
     ctx.fillText(String(tk), a.cx + a.r - 3, a.cy + a.r - 2.5);
 
     /* 名字 + 鱼位数字 */
@@ -6589,7 +7607,7 @@ function drawPlayerCard(ctx, state) {
 
     ctx.textAlign = 'right';
     ctx.font = '800 10.5px sans-serif';
-    ctx.fillStyle = perTank > 0 && here >= perTank ? '#c8441c' : TT.textSoft;
+    ctx.fillStyle = perTank > 0 && here >= perTank ? '#e06a55' : TT.textSoft;
     ctx.fillText(perTank > 0 ? here + '/' + perTank : String(here), c.x + c.w - 10, c.y + 18);
 
     /* 鱼位进度：槽 + 填充 */
@@ -6597,24 +7615,24 @@ function drawPlayerCard(ctx, state) {
     var p = perTank > 0 ? Math.min(1, here / perTank) : 0;
 
     roundRect(ctx, b.x, b.y, b.w, b.h, b.h / 2);
-    ctx.fillStyle = 'rgba(140,98,52,0.32)';
+    ctx.fillStyle = 'rgba(6,10,24,0.5)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(140,98,52,0.28)';
+    ctx.strokeStyle = 'rgba(200,164,92,0.4)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
 
     if (p > 0) {
         var fw = Math.max(b.h, b.w * p);
         var g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-        U.stop(g, 0, p >= 1 ? '#ffb35c' : '#a8ea74');
-        U.stop(g, 1, p >= 1 ? '#ef7a24' : '#4cae30');
+        U.stop(g, 0, p >= 1 ? '#e07a55' : '#e0c170');
+        U.stop(g, 1, p >= 1 ? '#a6332e' : '#9a7a35');
         roundRect(ctx, b.x, b.y, fw, b.h, b.h / 2);
         ctx.fillStyle = g;
         ctx.fill();
 
-        /* 前半截一点白，才有「软糖」的厚度 */
+        /* 前半截一点淡金，做出牌匾的高光 */
         roundRect(ctx, b.x + 2, b.y + 2, Math.max(0, fw - 4), b.h * 0.34, b.h * 0.17);
-        ctx.fillStyle = 'rgba(255,255,255,0.42)';
+        ctx.fillStyle = 'rgba(232,212,160,0.30)';
         ctx.fill();
     }
 }
@@ -6623,9 +7641,9 @@ function drawPlayerCard(ctx, state) {
 
 function pillBase(ctx, r) {
     Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-        top: '#ffffff',
-        bottom: '#fff1d6',
-        deep: 'rgba(150,105,50,0.24)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: r.h / 2,
         depth: 2.5,
         ink: TT.ink,
@@ -6654,7 +7672,7 @@ function drawCoinPill(ctx, state) {
         var st = wallet.format(s);
         ctx.textAlign = 'right';
         ctx.font = '800 11px sans-serif';
-        ctx.fillStyle = '#12658a';
+        ctx.fillStyle = TT.sky;
         ctx.fillText(st, r.x + r.w - 9, cy + 0.5);
         var sw = ctx.measureText(st).width;
         drawCoinBlue(ctx, r.x + r.w - 9 - sw - 8, cy, 7);
@@ -6670,7 +7688,7 @@ function drawFishPill(ctx, state) {
      * 这条胶囊读的是「所有缸加起来一共有几条鱼」。 */
     var total = (state.fish && state.fish.length) || 0;
 
-    drawFishIcon(ctx, r.x + 16, cy, 8.5, '#38b06a');
+    drawFishIcon(ctx, r.x + 16, cy, 8.5, '#6fbf9e');
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -6708,9 +7726,9 @@ function drawTankTabs(ctx, state) {
         var on = i === act;
 
         Th.badge(ctx, cx, cy, 9.5, {
-            top: on ? '#c4f59a' : (owned ? '#ffffff' : '#e6dac4'),
-            bottom: on ? '#5cc23f' : (owned ? '#f2e5c9' : '#cfc1a9'),
-            ink: owned ? TT.ink : 'rgba(107,68,35,0.4)',
+            top: on ? '#e0c170' : (owned ? TT.cardTop : '#232c46'),
+            bottom: on ? '#a8802f' : (owned ? TT.cardBottom : '#1a2238'),
+            ink: owned ? TT.ink : 'rgba(200,164,92,0.3)',
             lw: 2,
             gloss: on
         });
@@ -6718,7 +7736,7 @@ function drawTankTabs(ctx, state) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 10px sans-serif';
-        ctx.fillStyle = on ? '#ffffff' : (owned ? TT.text : 'rgba(107,68,35,0.45)');
+        ctx.fillStyle = on ? '#fff3d2' : (owned ? TT.text : 'rgba(200,164,92,0.4)');
         ctx.fillText(String(i + 1), cx, cy + 0.5);
     }
     ctx.restore();
@@ -6732,9 +7750,9 @@ function drawTankTabs(ctx, state) {
 
 function drawIconButton(ctx, r, o) {
     Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-        top: '#ffffff',
-        bottom: '#fbeccf',
-        deep: 'rgba(140,98,52,0.3)',
+        top: TT.cardTop,
+        bottom: TT.cardBottom,
+        deep: TT.cardDeep,
         r: 22,
         depth: 5,
         ink: TT.ink,
@@ -6765,17 +7783,17 @@ function drawButtons(ctx) {
     drawIconButton(ctx, L.FEED_BTN, {
         icon: 'feed',
         label: '撒食',
-        top: '#b6ec7d',
-        bottom: '#57b93c',
-        ink: '#2f7a25'
+        top: '#6fbf9e',
+        bottom: '#2f7a5e',
+        ink: '#1a5540'
     });
 
     drawIconButton(ctx, L.SHOP_BTN, {
-        icon: 'shop',
-        label: '商店',
-        top: '#9adaf8',
-        bottom: '#3f9fd4',
-        ink: '#1c6a94'
+        icon: 'menu',
+        label: '系统',
+        top: '#d8b96e',
+        bottom: '#a8802f',
+        ink: '#6f5220'
     });
 }
 
@@ -6794,7 +7812,7 @@ function drawFloaters(ctx, state) {
         var y = fl.y - 42 * p;
         ctx.globalAlpha = Math.max(0, 1 - p * p);
         ctx.lineWidth = 4;
-        ctx.strokeStyle = 'rgba(90,58,26,0.7)';
+        ctx.strokeStyle = 'rgba(6,10,24,0.8)';
         ctx.strokeText(fl.text, fl.x, y);
         ctx.fillStyle = fl.color;
         ctx.fillText(fl.text, fl.x, y);
@@ -6819,12 +7837,12 @@ function drawHint(ctx, state) {
     var by = C.TANK_TOP + 26;
 
     Th.jelly(ctx, (W - bw) / 2, by, bw, 34, {
-        top: 'rgba(255,255,255,0.92)',
-        bottom: 'rgba(255,241,214,0.92)',
-        deep: 'rgba(20,90,110,0.26)',
+        top: 'rgba(38,49,80,0.92)',
+        bottom: 'rgba(26,35,64,0.92)',
+        deep: 'rgba(6,10,24,0.5)',
         r: 17,
         depth: 2.5,
-        ink: 'rgba(107,68,35,0.55)',
+        ink: 'rgba(200,164,92,0.6)',
         lw: 1.8,
         gloss: false
     });
@@ -6848,11 +7866,12 @@ function drawToast(ctx, session) {
     var tw = ctx.measureText(session.toast.text).width + 36;
 
     Th.jelly(ctx, (W - tw) / 2, H * 0.36, tw, 42, {
-        top: '#fffdf4',
-        bottom: '#ffe7b8',
-        deep: 'rgba(140,96,46,0.34)',
+        top: '#263150',
+        bottom: '#1a2340',
+        deep: TT.cardDeep,
         r: 21,
         depth: 3,
+        ink: TT.ink,
         lw: 2.4
     });
 
@@ -6873,16 +7892,16 @@ function drawZoom(ctx) {
         var cx = r.x + r.w / 2;
         var cy = r.y + r.h / 2;
         Th.badge(ctx, cx, cy, r.w / 2, {
-            top: on ? '#ffffff' : '#e8ddc7',
-            bottom: on ? '#d7f3e2' : '#cbb99b',
-            ink: on ? '#2b7a5a' : '#9b8a70',
+            top: on ? '#e0c170' : TT.cardTop,
+            bottom: on ? '#a8802f' : TT.cardBottom,
+            ink: on ? TT.gold : TT.goldDeep,
             lw: 2,
             gloss: on
         });
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 18px sans-serif';
-        ctx.fillStyle = on ? '#216e50' : '#9b8a70';
+        ctx.fillStyle = on ? '#fff3d2' : TT.textSoft;
         ctx.fillText(txt, cx, cy + 0.5);
     }
 
@@ -6894,12 +7913,12 @@ function drawZoom(ctx) {
     ctx.textBaseline = 'middle';
     ctx.font = '800 10px sans-serif';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.strokeStyle = 'rgba(6,10,24,0.92)';
     ctx.lineWidth = 3;
     var lx = (L.ZOOM_OUT.x + L.ZOOM_IN.x + L.ZOOM_IN.w) / 2;
     var ly = L.ZOOM_OUT.y + L.ZOOM_OUT.h + 9;
     ctx.strokeText(view.label(), lx, ly);
-    ctx.fillStyle = '#2b6b76';
+    ctx.fillStyle = TT.goldLight;
     ctx.fillText(view.label(), lx, ly);
 }
 
@@ -6912,6 +7931,374 @@ module.exports = {
     drawHint: drawHint,
     drawVignette: drawVignette,
     drawToast: drawToast
+};
+
+  };
+
+  defs["render/codex.js"] = function (module, exports, require) {
+/* ============================================================
+ * render/codex.js · 鱼类图鉴（阴阳师 · 式神录风格）
+ *
+ * 视觉语言参考阴阳师的「式神录」：
+ *   · 深墨底 + 描金细线，像翻开一卷夜色图录
+ *   · 每格一张牌匾，已发现 = 彩鱼 + 名字，未发现 = 灰剪影 + ?
+ *   · 稀有度用朱红/金/青分档 + 星数，不用字母角标
+ *   · 点一格弹出详情卡：大图、介绍、成鱼身价、成熟时间、获取途径
+ *
+ * 只负责画。收录数据在 core/codex.js，命中区在 ui/layout.js。
+ * ============================================================ */
+
+var C = require('./canvas.js');
+var U = require('./util.js');
+var Th = require('./theme.js');
+var TT = Th.T;
+var art = require('./fishart.js');
+var codex = require('../core/codex.js');
+var wallet = require('../core/wallet.js');
+var L = require('../ui/layout.js');
+
+var W = C.W;
+var H = C.H;
+var rr = U.roundRect;
+
+/* 式神录配色：深墨底 + 描金，庄重如夜庭图录 */
+var CARD_TOP = TT.cardTop;
+var CARD_BOTTOM = TT.cardBottom;
+var INK = '#c8a45c';
+var TEXT = '#e8d4a0';
+var TEXT_SOFT = '#a4956e';
+var GOLD = '#e0c170';
+var GOLD_INK = '#4a3610';
+
+/* 稀有度 → 颜色 + 星数（图鉴里不用字母） */
+var RANK = {
+    R:   { fill: '#2c4a44', ink: '#9fdcc0', star: 1 },
+    SR:  { fill: '#3a3a5e', ink: '#c9b6ee', star: 2 },
+    SSR: { fill: '#5a4030', ink: '#e0c170', star: 3 }
+};
+
+function rankOf(sp) {
+    if (sp.secret) return { fill: '#5a2220', ink: '#f4a08e', star: 4 };
+    return RANK[sp.rarity] || RANK.R;
+}
+
+/* ---------------- 装饰：星星 ---------------- */
+function star(ctx, cx, cy, r, fill, ink, points) {
+    var n = points || 5;
+    ctx.beginPath();
+    for (var i = 0; i < n * 2; i++) {
+        var ang = -Math.PI / 2 + i * Math.PI / n;
+        var rad = i % 2 === 0 ? r : r * 0.44;
+        var px = cx + Math.cos(ang) * rad;
+        var py = cy + Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (ink) {
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+    }
+}
+
+/* 背景星星：固定位置，不闪，避免整页闪瞎 */
+function drawStars(ctx, top, t) {
+    var pts = [
+        [0.10, 0.10, 5], [0.22, 0.05, 3], [0.36, 0.13, 4], [0.52, 0.06, 3],
+        [0.66, 0.11, 5], [0.80, 0.05, 3], [0.92, 0.14, 4], [0.06, 0.55, 3],
+        [0.95, 0.62, 4], [0.15, 0.86, 3], [0.86, 0.90, 4]
+    ];
+    var area = H - top;
+    for (var i = 0; i < pts.length; i++) {
+        var p = pts[i];
+        var twinkle = 0.72 + 0.28 * Math.sin((t || 0) * 1.6 + i * 1.3);
+        ctx.globalAlpha = 0.30 * twinkle;
+        star(ctx, W * p[0], top + area * p[1], p[2], '#e8d4a0', null);
+    }
+    ctx.globalAlpha = 1;
+}
+
+/* ---------------- 图鉴格子 ---------------- */
+function drawCard(ctx, item, r, t, ease) {
+    var sp = item.sp;
+    var rank = rankOf(sp);
+    var found = item.found;
+
+    /* 卡片底板 */
+    if (found) {
+        Th.jelly(ctx, r.x, r.y, r.w, r.h, {
+            top: CARD_TOP, bottom: CARD_BOTTOM,
+            deep: 'rgba(6,10,24,0.5)',
+            r: 16, depth: 3, ink: 'rgba(200,164,92,0.6)', lw: 2
+        });
+    } else {
+        Th.jelly(ctx, r.x, r.y, r.w, r.h, {
+            top: '#1e2740', bottom: '#182035',
+            deep: 'rgba(6,10,24,0.4)',
+            r: 16, depth: 2, ink: 'rgba(200,164,92,0.3)', lw: 1.6, gloss: false
+        });
+    }
+
+    /* 缩略图圆框 */
+    var box = L.codexThumbRect(r);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(box.cx, box.cy, box.r, 0, Math.PI * 2);
+    ctx.fillStyle = found ? '#141d33' : '#111828';
+    ctx.fill();
+    ctx.strokeStyle = found ? rank.ink : 'rgba(200,164,92,0.3)';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+    ctx.clip();
+
+    if (found) {
+        ctx.globalAlpha = ease;
+        art.drawThumb(ctx, sp.id, box.cx - box.r, box.cy - box.r, box.r * 2, box.r * 2, {
+            t: t || 0, phase: item.index * 1.7
+        });
+        ctx.globalAlpha = 1;
+    } else {
+        /* 未发现：灰鱼剪影 + 问号 */
+        ctx.globalAlpha = 0.22;
+        art.drawThumb(ctx, sp.id, box.cx - box.r, box.cy - box.r, box.r * 2, box.r * 2, {
+            t: 0, phase: 0
+        });
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        Th.textOutlined(ctx, '?', box.cx, box.cy + 1, 26, '#e8d4a0', '#1a1526', 3);
+    }
+    ctx.restore();
+
+    /* 文字区 */
+    var tx = r.x + 10 + box.r * 2 + 10;
+    var tw = r.x + r.w - tx - 10;
+
+    /* 编号 */
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 10px sans-serif';
+    ctx.fillStyle = TEXT_SOFT;
+    ctx.fillText('NO.' + (item.index < 10 ? '0' : '') + item.index, tx, r.y + 15);
+
+    /* 名字：未发现打码，隐藏款发现后才露出 */
+    ctx.font = '800 15px sans-serif';
+    if (found) {
+        Th.textOutlined(ctx, U.fitText(ctx, sp.name, tw), tx, r.y + 35, 15, TEXT, '#141d33', 3);
+    } else {
+        ctx.fillStyle = '#7a6e50';
+        ctx.fillText('???', tx, r.y + 35);
+    }
+
+    /* 稀有度：色条 + 星数 */
+    var barY = r.y + 50;
+    rr(ctx, tx, barY, 46, 16, 8);
+    ctx.fillStyle = found ? rank.fill : '#222b44';
+    ctx.fill();
+    ctx.fillStyle = found ? rank.ink : '#6f6448';
+    ctx.font = '800 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(found ? starString(rank.star) : '???', tx + 23, barY + 8.5);
+
+    /* 已获得次数：紧贴稀有度条右侧 */
+    ctx.textAlign = 'left';
+    ctx.font = '600 10.5px sans-serif';
+    ctx.fillStyle = found ? TEXT_SOFT : '#6f6448';
+    var tail = found ? '×' + item.count : (sp.secret ? '隐藏' : '');
+    ctx.fillText(tail, tx + 54, barY + 8.5);
+
+    /* 底行：发现才公开身价，未发现给一句提示 */
+    ctx.font = '700 11px sans-serif';
+    ctx.fillStyle = found ? '#e0c170' : '#6f6448';
+    var bottom = found
+        ? '成鱼 ' + wallet.format(Math.round(item.price))
+        : (sp.secret ? '神秘彩蛋' : '待发现');
+    ctx.fillText(U.fitText(ctx, bottom, tw), tx, r.y + 71);
+}
+
+function starString(n) {
+    var s = '';
+    for (var i = 0; i < n; i++) s += '★';
+    return s;
+}
+
+/* ---------------- 图鉴主页 ---------------- */
+function drawGrid(ctx, state, ease) {
+    var t = state.t || 0;
+    var list = codex.list(state);
+    for (var i = 0; i < list.length; i++) {
+        var r = L.codexRect(i, ease);
+        drawCard(ctx, list[i], r, t, ease);
+    }
+}
+
+/* ---------------- 详情浮层 ---------------- */
+function drawDetail(ctx, state, session, ease) {
+    var idx = session.codexDetail;
+    if (idx == null) return;
+    var list = codex.list(state);
+    var item = list[idx];
+    if (!item) return;
+    var sp = item.sp;
+    var rank = rankOf(sp);
+
+    ctx.save();
+    ctx.globalAlpha = ease;
+    ctx.fillStyle = 'rgba(6,10,24,0.72)';
+    ctx.fillRect(0, 0, W, H);
+
+    var d = L.codexDetailRect(ease);
+    Th.jelly(ctx, d.x, d.y, d.w, d.h, {
+        top: '#263150', bottom: '#161f38',
+        deep: 'rgba(6,10,24,0.7)', r: 20, depth: 5,
+        ink: INK, lw: 2.6
+    });
+
+    /* 顶部色带 */
+    ctx.save();
+    rr(ctx, d.x, d.y, d.w, 54, 20);
+    ctx.fillStyle = foundFill(item, rank);
+    ctx.fill();
+    ctx.restore();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    Th.textOutlined(ctx, item.found ? sp.name : '???', d.x + d.w / 2, d.y + 30, 20,
+        '#fff3d2', foundInk(item, rank), 3);
+
+    /* 大图 */
+    var box = L.codexDetailThumb(d);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(box.cx, box.cy, box.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#141d33';
+    ctx.fill();
+    ctx.clip();
+    if (item.found) {
+        art.drawThumb(ctx, sp.id, box.cx - box.r, box.cy - box.r, box.r * 2, box.r * 2, {
+            t: state.t || 0, phase: idx * 1.7
+        });
+    } else {
+        ctx.globalAlpha = 0.2;
+        art.drawThumb(ctx, sp.id, box.cx - box.r, box.cy - box.r, box.r * 2, box.r * 2, { t: 0 });
+        ctx.globalAlpha = 1;
+        Th.textOutlined(ctx, '?', box.cx, box.cy + 1, 34, '#e8d4a0', '#1a1526', 4);
+    }
+    ctx.restore();
+
+    /* 资料行 */
+    var lines = item.found ? [
+        ['稀有度', item.sp.secret ? '隐藏款' : item.sp.rarity + ' · ' + starString(rank.star)],
+        ['成鱼身价', wallet.format(Math.round(item.price)) + ' 鱼币'],
+        ['成熟时间', Math.round(item.mature / 60) + ' 分钟'],
+        ['获得途径', item.source],
+        ['累计收集', item.count + ' 条']
+    ] : [
+        ['稀有度', '???'],
+        ['获得途径', item.sp.secret ? '隐藏款 · 继续探索' : item.source],
+        ['提示', '开出这条鱼后自动解锁']
+    ];
+
+    var ly = d.y + 96;
+    var labelW = 62;
+    /* 前两行右侧有鱼图，值最多写到鱼图左边；后几行可以放宽 */
+    var valueMaxWide = d.w - labelW - 48;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (var i = 0; i < lines.length; i++) {
+        var rowY = ly + i * 26;
+        /* 隔行淡底，像图鉴的资料表格 */
+        if (i % 2 === 0) {
+            rr(ctx, d.x + 16, rowY - 12, d.w - 32, 24, 8);
+            ctx.fillStyle = 'rgba(200,164,92,0.10)';
+            ctx.fill();
+        }
+        ctx.font = '700 12px sans-serif';
+        ctx.fillStyle = TEXT_SOFT;
+        ctx.fillText(lines[i][0], d.x + 26, rowY);
+        ctx.font = '600 12px sans-serif';
+        ctx.fillStyle = TEXT;
+        /* 鱼图占右上角 y≈90~174，这几行把值限制在鱼图左侧 */
+        var maxW = (i < 3) ? (d.w - labelW - 130) : valueMaxWide;
+        ctx.fillText(U.fitText(ctx, lines[i][1], maxW), d.x + 26 + labelW, rowY);
+    }
+
+    /* 描述 */
+    if (item.found && sp.desc) {
+        ctx.font = '600 11px sans-serif';
+        ctx.fillStyle = TEXT_SOFT;
+        ctx.fillText(U.fitText(ctx, sp.desc, d.w - 48), d.x + 24, d.y + d.h - 62);
+    }
+
+    /* 关闭按钮 */
+    var cr = L.codexDetailClose(d);
+    Th.jelly(ctx, cr.x, cr.y, cr.w, cr.h, {
+        top: '#2a3352', bottom: '#1a2340', deep: 'rgba(6,10,24,0.6)',
+        r: cr.w / 2, depth: 2, ink: INK, lw: 2, gloss: false
+    });
+    ctx.textAlign = 'center';
+    ctx.font = '800 18px sans-serif';
+    ctx.fillStyle = TT.goldLight;
+    ctx.fillText('×', cr.x + cr.w / 2, cr.y + cr.h / 2 + 1);
+
+    ctx.restore();
+}
+
+function foundFill(item, rank) {
+    if (!item.found) return '#2a3450';
+    return rank.fill;
+}
+function foundInk(item, rank) {
+    if (!item.found) return '#6f6448';
+    return rank.ink;
+}
+
+/* ---------------- 入口 ---------------- */
+function draw(ctx, state, session) {
+    var ease = session.sheetEase;
+    if (ease <= 0.001) return;
+    var top = L.sheetTop(ease);
+
+    ctx.save();
+    ctx.globalAlpha = ease;
+
+    /* 背景由 sheet.js 统一铺（蓝底），这里只画星星点缀。
+     * 星星避开顶部标题/页签区（top + 96 以下）。 */
+    drawStars(ctx, top + 96, state.t || 0);
+
+    /* 收集进度条 */
+    var pg = codex.progress(state);
+    var bar = L.codexProgressRect(ease);
+    rr(ctx, bar.x, bar.y, bar.w, bar.h, bar.h / 2);
+    ctx.fillStyle = 'rgba(6,10,24,0.55)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,164,92,0.45)';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    var fillW = (bar.w - 96) * pg.percent;
+    if (fillW > 0) {
+        rr(ctx, bar.x + 3, bar.y + 3, Math.max(bar.h - 6, fillW), bar.h - 6, (bar.h - 6) / 2);
+        ctx.fillStyle = '#c8a45c';
+        ctx.fill();
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '800 12px sans-serif';
+    ctx.fillStyle = TEXT;
+    ctx.fillText('收集进度', bar.x + 10, bar.y + bar.h / 2 + 1);
+    ctx.textAlign = 'right';
+    ctx.fillText(pg.found + ' / ' + pg.total, bar.x + bar.w - 10, bar.y + bar.h / 2 + 1);
+
+    drawGrid(ctx, state, ease);
+    ctx.restore();
+
+    drawDetail(ctx, state, session, ease);
+}
+
+module.exports = {
+    draw: draw,
+    rankOf: rankOf
 };
 
   };
@@ -6934,15 +8321,19 @@ var L = require('../ui/layout.js');
 var cfg = require('../config/index.js');
 var shop = require('../core/shop.js');
 var wallet = require('../core/wallet.js');
+var pond = require('../core/pond.js');
+var storage = require('../core/storage.js');
 var Th = require('./theme.js');
 var TT = Th.T;
+var codexRender = require('./codex.js');
 
 var W = C.W;
 var H = C.H;
 var roundRect = U.roundRect;
 
 var RARITY = cfg.rarityColor;
-var TAB_NAME = ['道具', '鱼卵'];
+var TAB_NAME = ['商店', '鱼卵', '图鉴', '鱼塘', '仓库'];
+var TAB_TITLE = ['商店', '鱼卵', '鱼类图鉴', '鱼塘', '仓库'];
 
 /* ---------------- 页签 ---------------- */
 
@@ -6950,16 +8341,21 @@ function drawTabs(ctx, session, ease) {
     for (var i = 0; i < TAB_NAME.length; i++) {
         var r = L.tabRect(i, ease);
         var on = session.sheetTab === i;
+        var isCodex = i === 2;
 
         if (on) {
-            Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-                top: TT.greenTop, bottom: TT.greenBottom, deep: TT.greenDeep,
-                r: 15, depth: 3, ink: '#2f7a25', lw: 2.4
+            Th.jelly(ctx, r.x, r.y, r.w, r.h, isCodex ? {
+                top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
+                r: 15, depth: 3, ink: '#5f1e18', lw: 2.4
+            } : {
+                top: TT.greenTop, bottom: TT.greenBottom,
+                deep: TT.greenDeep,
+                r: 15, depth: 3, ink: '#6f5220', lw: 2.4
             });
         } else {
             Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-                top: TT.cardTop, bottom: '#f3e3c4', deep: 'rgba(150,110,60,0.22)',
-                r: 15, depth: 3, ink: 'rgba(107,68,35,0.5)', lw: 2, gloss: false
+                top: '#2c3858', bottom: '#202a44', deep: TT.cardDeep,
+                r: 15, depth: 3, ink: 'rgba(200,164,92,0.45)', lw: 2, gloss: false
             });
         }
 
@@ -6967,7 +8363,8 @@ function drawTabs(ctx, session, ease) {
         ctx.textBaseline = 'middle';
         ctx.lineJoin = 'round';
         if (on) {
-            Th.textOutlined(ctx, TAB_NAME[i], r.x + r.w / 2, r.y + r.h / 2 + 1, 14, '#ffffff', '#2b6b20', 3);
+            Th.textOutlined(ctx, TAB_NAME[i], r.x + r.w / 2, r.y + r.h / 2 + 1, 14,
+                '#fff3d2', isCodex ? '#5f1e18' : '#4a3610', 3);
         } else {
             ctx.font = '700 14px sans-serif';
             ctx.fillStyle = TT.textSoft;
@@ -6994,7 +8391,7 @@ function drawItems(ctx, state, ease) {
         ctx.fillStyle = bg;
         ctx.globalAlpha = ease;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(107,68,35,0.5)';
+        ctx.strokeStyle = 'rgba(232,212,160,0.5)';
         ctx.lineWidth = 1.8;
         ctx.stroke();
         itemArt.draw(ctx, item.icon || item.id, r.x + 33, r.y + 35, 30, bg);
@@ -7019,12 +8416,12 @@ function drawItems(ctx, state, ease) {
             if (bwX + lw > btnLeft - 8) bwX = Math.max(r.x + 66, btnLeft - 8 - lw);
 
             roundRect(ctx, bwX, r.y + 18, lw, 16, 7);
-            ctx.fillStyle = '#e4f6d4';
+            ctx.fillStyle = '#2c4a44';
             ctx.fill();
-            ctx.strokeStyle = 'rgba(70,140,50,0.45)';
+            ctx.strokeStyle = 'rgba(111,191,158,0.5)';
             ctx.lineWidth = 1.2;
             ctx.stroke();
-            ctx.fillStyle = '#3d7f2a';
+            ctx.fillStyle = '#9fdcc0';
             ctx.font = '700 11px sans-serif';
             ctx.fillText(st.level, bwX + 7, r.y + 26.5);
         }
@@ -7040,19 +8437,19 @@ function drawItems(ctx, state, ease) {
         if (st.disabled) {
             Th.jelly(ctx, br.x, br.y, br.w, 38, {
                 top: TT.greyTop, bottom: TT.greyBottom, deep: TT.greyDeep,
-                r: 12, depth: 2.5, ink: 'rgba(107,68,35,0.35)', lw: 2, gloss: false
+                r: 12, depth: 2.5, ink: 'rgba(200,164,92,0.3)', lw: 2, gloss: false
             });
         } else {
             Th.jelly(ctx, br.x, br.y, br.w, 38, {
                 top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
-                r: 12, depth: 3, ink: '#8a5a12', lw: 2.4
+                r: 12, depth: 3, ink: '#5f1e18', lw: 2.4
             });
         }
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 14px sans-serif';
-        ctx.fillStyle = st.disabled ? '#a3906f' : '#6b4421';
+        ctx.fillStyle = st.disabled ? TT.textSoft : '#fff3d2';
         ctx.fillText(st.label, br.x + br.w / 2, br.y + 19.5);
     }
 }
@@ -7077,8 +8474,8 @@ function drawEggs(ctx, state, ease) {
         /* 卡片 */
         if (st.locked) {
             Th.card(ctx, r.x, r.y, r.w, r.h, {
-                r: 16, depth: 2.5, top: '#f7f1e4', bottom: '#e8ddc6',
-                deep: 'rgba(120,100,70,0.2)', ink: 'rgba(107,68,35,0.32)', lw: 2
+                r: 16, depth: 2.5, top: '#202a44', bottom: '#1a2238',
+                deep: 'rgba(6,10,24,0.4)', ink: 'rgba(200,164,92,0.28)', lw: 2
             });
         } else {
             Th.card(ctx, r.x, r.y, r.w, r.h, { r: 16, depth: 2.5 });
@@ -7111,7 +8508,7 @@ function drawEggs(ctx, state, ease) {
             }
             ctx.closePath();
             ctx.fill();
-            ctx.strokeStyle = '#a56a10';
+            ctx.strokeStyle = '#5f1e18';
             ctx.lineWidth = 1.2;
             ctx.stroke();
             ctx.restore();
@@ -7120,13 +8517,13 @@ function drawEggs(ctx, state, ease) {
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.font = '800 15px sans-serif';
-        ctx.fillStyle = st.locked ? '#a2927a' : TT.text;
+        ctx.fillStyle = st.locked ? 'rgba(164,149,110,0.55)' : TT.text;
         ctx.fillText(EGG_NAME[st.rarity] || st.rarity,
             tx + (st.rarity === 'LEGEND' ? 20 : 0), r.y + 26);
 
         /* 副信息：这一档能开出哪些鱼，以及卖价区间 */
         ctx.font = '600 11px sans-serif';
-        ctx.fillStyle = st.locked ? '#b3a58c' : TT.textSoft;
+        ctx.fillStyle = st.locked ? 'rgba(164,149,110,0.5)' : TT.textSoft;
         var sub = st.locked
             ? '需 ' + st.need + ' 条鱼解锁'
             : st.rarity === 'LEGEND'
@@ -7138,7 +8535,7 @@ function drawEggs(ctx, state, ease) {
 
         /* 第三行：平均能卖多少，帮助判断值不值 */
         ctx.font = '600 10.5px sans-serif';
-        ctx.fillStyle = st.locked ? '#bdb09a' : '#9a7a52';
+        ctx.fillStyle = st.locked ? 'rgba(164,149,110,0.45)' : TT.textSoft;
         var tip = st.locked
             ? '鱼越多解锁越快'
             : st.rarity === 'LEGEND'
@@ -7152,24 +8549,276 @@ function drawEggs(ctx, state, ease) {
         if (st.disabled) {
             Th.jelly(ctx, b.x, b.y, b.w, b.h, {
                 top: TT.greyTop, bottom: TT.greyBottom, deep: TT.greyDeep,
-                r: 12, depth: 2, ink: 'rgba(107,68,35,0.32)', lw: 1.8, gloss: false
+                r: 12, depth: 2, ink: 'rgba(200,164,92,0.28)', lw: 1.8, gloss: false
             });
         } else {
             Th.jelly(ctx, b.x, b.y, b.w, b.h, {
                 top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
-                r: 12, depth: 3, ink: '#8a5a12', lw: 2.2
+                r: 12, depth: 3, ink: '#5f1e18', lw: 2.2
             });
         }
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '800 13px sans-serif';
-        ctx.fillStyle = st.disabled ? '#a3906f' : '#6b4421';
+        ctx.fillStyle = st.disabled ? TT.textSoft : '#fff3d2';
         ctx.fillText(st.locked ? '未解锁' : st.full ? '鱼位满' : st.label, b.x + b.w / 2, b.y + b.h / 2 + 1);
     }
 }
 
 /* ---------------- 入口 ---------------- */
+
+/* ---------------- 鱼塘页 ---------------- */
+
+function rarityName(r) {
+    return r === 'SR' ? '稀有' : r === 'SSR' ? '传说' : r === 'LEGEND' ? '传奇' : '普通';
+}
+
+function drawPond(ctx, state, ease) {
+    var st = pond.statusOf(state);
+    var scene = L.pondSceneRect(ease);
+    var t = state.t || 0;
+
+    /* 池塘：圆角裁剪内画水、波纹、荷叶、鱼影 */
+    ctx.save();
+    roundRect(ctx, scene.x, scene.y, scene.w, scene.h, 18);
+    ctx.clip();
+
+    var g = ctx.createLinearGradient(0, scene.y, 0, scene.y + scene.h);
+    U.stop(g, 0, '#1b3350');
+    U.stop(g, 1, '#0e2038');
+    ctx.fillStyle = g;
+    ctx.fillRect(scene.x, scene.y, scene.w, scene.h);
+
+    /* 水面波纹：几条缓慢起伏的横线 */
+    ctx.strokeStyle = 'rgba(200,220,255,0.14)';
+    ctx.lineWidth = 1.6;
+    for (var w = 0; w < 4; w++) {
+        var wy = scene.y + 30 + w * 44;
+        ctx.beginPath();
+        for (var x = 0; x <= scene.w; x += 8) {
+            var yy = wy + Math.sin(x / scene.w * 9.42 + t * 1.1 + w) * 4;
+            if (x === 0) ctx.moveTo(scene.x + x, yy);
+            else ctx.lineTo(scene.x + x, yy);
+        }
+        ctx.stroke();
+    }
+
+    /* 荷叶：三片深绿椭圆，大小错开，不宜过大否则盖住水面 */
+    var pads = [[0.18, 0.26, 21], [0.78, 0.50, 15], [0.44, 0.79, 13]];
+    for (var p = 0; p < pads.length; p++) {
+        var px = scene.x + scene.w * pads[p][0];
+        var py = scene.y + scene.h * pads[p][1];
+        var pr = pads[p][2];
+        ctx.beginPath();
+        U.ellipse(ctx, px, py, pr, pr * 0.52, -0.15);
+        ctx.fillStyle = 'rgba(38,92,66,0.85)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(111,191,158,0.5)';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+    }
+
+    /* 鱼影：三条剪影慢慢横穿水面 */
+    for (var k = 0; k < 3; k++) {
+        var span = scene.w + 80;
+        var fx = scene.x - 40 + ((t * (14 + k * 6) + k * 150) % span);
+        var fy = scene.y + 56 + k * 36 + Math.sin(t * 1.4 + k) * 5;
+        /* 池底本身就深，鱼影要比背景更黑才看得见 */
+        ctx.fillStyle = 'rgba(2,6,14,0.62)';
+        ctx.beginPath();
+        U.ellipse(ctx, fx, fy, 17, 9, 0);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(fx - 15, fy);
+        ctx.lineTo(fx - 26, fy - 8);
+        ctx.lineTo(fx - 26, fy + 8);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+
+    /* 池塘边框 */
+    roundRect(ctx, scene.x, scene.y, scene.w, scene.h, 18);
+    ctx.strokeStyle = 'rgba(200,164,92,0.5)';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+
+    /* 信息行：塘名 + 可钓鱼种；右侧鱼饵余量 */
+    var iy = scene.y + scene.h + 18;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '800 15px sans-serif';
+    ctx.fillStyle = TT.goldLight;
+    ctx.fillText(st.name, 18, iy);
+    ctx.font = '600 11.5px sans-serif';
+    ctx.fillStyle = TT.textSoft;
+    ctx.fillText('可钓 ' + st.poolCount + ' 种' + rarityName(st.rarity) + '鱼', 18, iy + 21);
+
+    itemArt.draw(ctx, 'bait', W - 84, iy + 2, 22);
+    ctx.textAlign = 'right';
+    ctx.font = '800 15px sans-serif';
+    ctx.fillStyle = st.bait > 0 ? TT.text : '#e0847a';
+    ctx.fillText('×' + st.bait, W - 18, iy + 3);
+
+    /* 抛竿按钮 */
+    var b = L.pondCastRect(ease);
+    var on = st.canCast;
+    Th.jelly(ctx, b.x, b.y, b.w, b.h, on ? {
+        top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
+        r: 18, depth: 4, ink: '#5f1e18', lw: 2.6
+    } : {
+        top: TT.greyTop, bottom: TT.greyBottom, deep: TT.greyDeep,
+        r: 18, depth: 3, ink: 'rgba(200,164,92,0.3)', lw: 2, gloss: false
+    });
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '800 18px sans-serif';
+    ctx.fillStyle = on ? '#fff3d2' : TT.textSoft;
+    ctx.fillText('抛竿钓鱼', b.x + b.w / 2, b.y + b.h / 2 - 7);
+    ctx.font = '600 11px sans-serif';
+    ctx.fillStyle = on ? 'rgba(255,243,210,0.78)' : TT.textSoft;
+    ctx.fillText(on ? '消耗鱼饵 ×1' : '鱼饵不足 · 去商店买', b.x + b.w / 2, b.y + b.h / 2 + 13);
+
+    /* 概率小字 */
+    ctx.font = '600 11px sans-serif';
+    ctx.fillStyle = TT.textSoft;
+    ctx.fillText('约 ' + Math.round((1 - st.oysterRate) * 100) + '% 出鱼 · ' +
+        Math.round(st.oysterRate * 100) + '% 出珍珠贝', b.x + b.w / 2, b.y + b.h + 15);
+}
+
+/* ---------------- 仓库页 ---------------- */
+
+function drawBag(ctx, state, ease, session) {
+    var list = pond.caughtList(state);
+    var st = pond.statusOf(state);
+    var top = L.sheetTop(ease);
+    var t = state.t || 0;
+
+    /* 小标题：鱼篓 */
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 12px sans-serif';
+    ctx.fillStyle = TT.textSoft;
+    ctx.fillText('鱼篓 · ' + list.length + ' 条', 18, top + L.BAG_TOP + 6);
+
+    /* 鱼网格 3×3 */
+    var maxShow = L.BAG_COLS * L.BAG_ROWS;
+    for (var i = 0; i < maxShow; i++) {
+        var r = L.bagFishRect(i, ease);
+        var cell = list[i];
+        if (cell) {
+            var sel = session.bagSel === cell.fish.id;
+            Th.card(ctx, r.x, r.y, r.w, r.h, sel ? {
+                r: 14, depth: 3, top: '#3d3122', bottom: '#2b2318',
+                ink: TT.gold, lw: 2.2
+            } : { r: 14, depth: 2 });
+
+            art.drawThumb(ctx, cell.species.id, r.x + 5, r.y + 4, r.w - 10, 46, {
+                t: t, phase: i * 1.3
+            });
+
+            ctx.textAlign = 'center';
+            ctx.font = '700 10px sans-serif';
+            ctx.fillStyle = TT.textSoft;
+            ctx.fillText(cell.stage + ' ' + cell.growth + '%', r.x + r.w / 2, r.y + r.h - 22);
+            ctx.font = '800 12px sans-serif';
+            ctx.fillStyle = TT.goldLight;
+            ctx.fillText(wallet.format(cell.price), r.x + r.w / 2, r.y + r.h - 8);
+        } else {
+            roundRect(ctx, r.x, r.y, r.w, r.h, 14);
+            ctx.strokeStyle = 'rgba(200,164,92,0.16)';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+    }
+
+    /* 超出 9 条的提示 */
+    if (list.length > maxShow) {
+        ctx.textAlign = 'right';
+        ctx.font = '600 10.5px sans-serif';
+        ctx.fillStyle = TT.textSoft;
+        ctx.fillText('还有 ' + (list.length - maxShow) + ' 条未显示',
+            W - 18, top + L.BAG_GRID_Y + L.BAG_ROWS * (L.BAG_CELL_H + 8) - 10);
+    }
+
+    /* 道具行：珍珠贝 / 珍珠 / 鱼饵 */
+    var items = [
+        { icon: 'oyster', name: '珍珠贝', n: st.oyster, act: '打破', on: st.oyster > 0, bg: '#3a3358' },
+        { icon: 'pearl', name: '珍珠', n: st.pearl, act: '卖 1万', on: st.pearl > 0, bg: '#2f5a72' },
+        { icon: 'bait', name: '鱼饵', n: st.bait, act: '钓具', on: false, bg: '#3d5a2f' }
+    ];
+    for (var k = 0; k < items.length; k++) {
+        var it = items[k];
+        var ir = L.bagItemRect(k, ease);
+        Th.card(ctx, ir.x, ir.y, ir.w, ir.h, { r: 14, depth: 2 });
+
+        /* 图标块 */
+        roundRect(ctx, ir.x + 8, ir.y + 10, 40, 40, 12);
+        ctx.fillStyle = it.bg;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(232,212,160,0.45)';
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        itemArt.draw(ctx, it.icon, ir.x + 28, ir.y + 30, 28, it.bg);
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = '800 12px sans-serif';
+        ctx.fillStyle = TT.text;
+        ctx.fillText(it.name, ir.x + 54, ir.y + 24);
+
+        ctx.font = '800 13px sans-serif';
+        ctx.fillStyle = it.n > 0 ? TT.goldLight : TT.textSoft;
+        ctx.fillText('×' + it.n, ir.x + 54, ir.y + 42);
+
+        ctx.textAlign = 'center';
+        ctx.font = '600 10px sans-serif';
+        ctx.fillStyle = it.on ? TT.gold : TT.textSoft;
+        ctx.fillText(it.act, ir.x + ir.w / 2, ir.y + ir.h - 9);
+    }
+
+    /* 底部操作栏：只服务选中的鱼 */
+    var a0 = L.bagActionRect(0, ease);
+    var a1 = L.bagActionRect(1, ease);
+    var pick = null;
+    for (var s = 0; s < list.length; s++) {
+        if (list[s].fish.id === session.bagSel) { pick = list[s]; break; }
+    }
+
+    if (pick) {
+        /* 左：放进鱼缸 */
+        Th.jelly(ctx, a0.x, a0.y, a0.w, a0.h, {
+            top: TT.greenTop, bottom: TT.greenBottom, deep: TT.greenDeep,
+            r: 14, depth: 3, ink: '#2f6b45', lw: 2.2
+        });
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '800 15px sans-serif';
+        ctx.fillStyle = '#eafff2';
+        ctx.fillText('放入鱼缸', a0.x + a0.w / 2, a0.y + a0.h / 2);
+
+        /* 右：卖掉 */
+        Th.jelly(ctx, a1.x, a1.y, a1.w, a1.h, {
+            top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
+            r: 14, depth: 3, ink: '#5f1e18', lw: 2.2
+        });
+        ctx.font = '800 15px sans-serif';
+        ctx.fillStyle = '#fff3d2';
+        ctx.fillText('卖 +' + wallet.format(pick.price), a1.x + a1.w / 2, a1.y + a1.h / 2);
+    } else {
+        Th.jelly(ctx, a0.x, a0.y, W - 32, a0.h, {
+            top: '#2a3352', bottom: '#1a2340', deep: TT.cardDeep,
+            r: 14, depth: 2, ink: 'rgba(200,164,92,0.28)', lw: 1.8, gloss: false
+        });
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '600 12px sans-serif';
+        ctx.fillStyle = TT.textSoft;
+        ctx.fillText('点一条鱼选中，再选择放缸或卖掉', a0.x + (W - 32) / 2, a0.y + a0.h / 2);
+    }
+}
 
 function draw(ctx, state, session) {
     var ease = session.sheetEase;
@@ -7177,8 +8826,8 @@ function draw(ctx, state, session) {
 
     ctx.save();
     ctx.globalAlpha = ease;
-    /* 遮罩用暖棕而不是纯黑，卡通风格下纯黑会显脏 */
-    ctx.fillStyle = 'rgba(58,38,18,0.42)';
+    /* 遮罩用深墨而非纯黑，和风夜色下更自然 */
+    ctx.fillStyle = 'rgba(6,10,24,0.66)';
     ctx.fillRect(0, 0, W, H);
 
     var top = L.sheetTop(ease);
@@ -7192,13 +8841,19 @@ function draw(ctx, state, session) {
     ctx.lineTo(W, H);
     ctx.lineTo(0, H);
     ctx.closePath();
+    var isCodex = session.sheetTab === 2;
     var bgG = ctx.createLinearGradient(0, top, 0, H);
-    U.stop(bgG, 0, '#fffdf6');
-    U.stop(bgG, 1, '#ffeed0');
+    if (isCodex) {
+        U.stop(bgG, 0, '#1e2a46');
+        U.stop(bgG, 1, '#121a30');
+    } else {
+        U.stop(bgG, 0, '#263150');
+        U.stop(bgG, 1, '#161f38');
+    }
     ctx.fillStyle = bgG;
     ctx.fill();
-    /* 木色描边 */
-    ctx.strokeStyle = '#6b4423';
+    /* 描边：三页统一描金 */
+    ctx.strokeStyle = '#c8a45c';
     ctx.lineWidth = 3;
     ctx.stroke();
 
@@ -7212,7 +8867,7 @@ function draw(ctx, state, session) {
     ctx.lineTo(W, top + 30);
     ctx.lineTo(0, top + 30);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillStyle = 'rgba(232,212,160,0.10)';
     ctx.fill();
     ctx.restore();
 
@@ -7220,34 +8875,41 @@ function draw(ctx, state, session) {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = '800 19px sans-serif';
-    ctx.fillStyle = TT.text;
-    ctx.fillText('商店', 18, top + 34);
+    ctx.fillStyle = TT.goldLight;
+    ctx.fillText(TAB_TITLE[session.sheetTab] || '系统', 18, top + 34);
 
     /* 关闭按钮 */
     var cr = L.closeRect(ease);
     Th.jelly(ctx, cr.x, cr.y, 32, 32, {
-        top: '#fff3d8', bottom: '#f0cf9a', deep: 'rgba(150,110,60,0.3)',
+        top: '#2a3352', bottom: '#1a2340', deep: TT.cardDeep,
         r: 16, depth: 2, ink: TT.ink, lw: 2.2, gloss: false
     });
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '800 20px sans-serif';
-    ctx.fillStyle = TT.text;
+    ctx.fillStyle = TT.goldLight;
     ctx.fillText('×', cr.x + 16, cr.y + 16.5);
 
-    /* 两页 */
+    /* 五页 */
     drawTabs(ctx, session, ease);
-    if (session.sheetTab === 1) drawEggs(ctx, state, ease);
+    if (session.sheetTab === 2) codexRender.draw(ctx, state, session);
+    else if (session.sheetTab === 1) drawEggs(ctx, state, ease);
+    else if (session.sheetTab === 3) drawPond(ctx, state, ease);
+    else if (session.sheetTab === 4) drawBag(ctx, state, ease, session);
     else drawItems(ctx, state, ease);
 
     /* 底部提示 */
     ctx.textAlign = 'center';
     ctx.font = '600 12px sans-serif';
     ctx.fillStyle = TT.textSoft;
-    var tip = session.sheetTab === 1
-        ? '普通卵随机出鱼 · 传奇卵必出小鲨鱼'
-        : '鱼位满了可以开新缸 · 仓库扩容加鱼位';
-    ctx.fillText(tip, W / 2, H - C.SAFE_BOTTOM - 12);
+    var tips = [
+        '鱼位满了可以开新缸 · 仓库扩容加鱼位',
+        '普通卵随机出鱼 · 传奇卵必出小鲨鱼',
+        '点开任意一条鱼查看资料 · 卖掉也会保留收录',
+        '钓上来的鱼先进仓库 · 放缸养大更值钱',
+        '点鱼选中 · 可放缸也可直接卖'
+    ];
+    ctx.fillText(tips[session.sheetTab] || tips[0], W / 2, H - C.SAFE_BOTTOM - 12);
 
     ctx.restore();
 }

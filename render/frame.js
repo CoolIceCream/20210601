@@ -25,7 +25,8 @@ var TOP = C.TANK_TOP;
 var BOT = C.TANK_BOTTOM;
 var FX = C.FRAME_X;
 
-var WOOD = '#6b4423';
+var WOOD = '#c8a45c';       /* 描金 */
+var LINE = 'rgba(200,164,92,'; /* 金线前缀（和风描边） */
 var CARD_X = 5;
 
 /* ---------------- 外轮廓 ---------------- */
@@ -42,9 +43,9 @@ function drawCard(ctx) {
     ctx.closePath();
 
     var g = ctx.createLinearGradient(0, 0, 0, H);
-    U.stop(g, 0, '#fffefa');
-    U.stop(g, 0.5, '#fdf5e4');
-    U.stop(g, 1, '#f9ebcd');
+    U.stop(g, 0, '#202a48');
+    U.stop(g, 0.5, '#18213c');
+    U.stop(g, 1, '#111a30');
     ctx.fillStyle = g;
     ctx.fill();
 
@@ -59,7 +60,7 @@ function hair(ctx, y, alpha) {
     ctx.beginPath();
     ctx.moveTo(CARD_X + 1, y);
     ctx.lineTo(W - CARD_X - 1, y);
-    ctx.strokeStyle = 'rgba(107,68,35,' + alpha + ')';
+    ctx.strokeStyle = LINE + alpha + ')';
     ctx.lineWidth = 1.7;
     ctx.stroke();
 }
@@ -72,7 +73,7 @@ function drawWalls(ctx) {
         ctx.beginPath();
         ctx.moveTo(x, TOP);
         ctx.lineTo(x, BOT);
-        ctx.strokeStyle = 'rgba(107,68,35,0.62)';
+        ctx.strokeStyle = LINE + '0.62)';
         ctx.lineWidth = 1.7;
         ctx.stroke();
     }
@@ -83,27 +84,27 @@ function drawWalls(ctx) {
 /* 水面被缸盖压住、沙底被缸底托住，两道影让水看着是「装在里面」的 */
 function drawGlassShade(ctx) {
     var g = ctx.createLinearGradient(0, TOP, 0, TOP + 14);
-    U.stop(g, 0, 'rgba(16,64,84,0.19)');
-    U.stop(g, 1, 'rgba(16,64,84,0)');
+    U.stop(g, 0, 'rgba(6,10,28,0.30)');
+    U.stop(g, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g;
     ctx.fillRect(FX, TOP, W - FX * 2, 14);
 
     var g2 = ctx.createLinearGradient(0, BOT - 16, 0, BOT);
-    U.stop(g2, 0, 'rgba(16,64,84,0)');
-    U.stop(g2, 1, 'rgba(16,64,84,0.15)');
+    U.stop(g2, 0, 'rgba(6,10,28,0)');
+    U.stop(g2, 1, 'rgba(6,10,28,0.26)');
     ctx.fillStyle = g2;
     ctx.fillRect(FX, BOT - 16, W - FX * 2, 16);
 
     /* 贴着缸壁的一窄条暗，玻璃厚度就出来了 */
     var g3 = ctx.createLinearGradient(FX, 0, FX + 9, 0);
-    U.stop(g3, 0, 'rgba(16,64,84,0.14)');
-    U.stop(g3, 1, 'rgba(16,64,84,0)');
+    U.stop(g3, 0, 'rgba(6,10,28,0.22)');
+    U.stop(g3, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g3;
     ctx.fillRect(FX, TOP, 9, BOT - TOP);
 
     var g4 = ctx.createLinearGradient(W - FX, 0, W - FX - 9, 0);
-    U.stop(g4, 0, 'rgba(16,64,84,0.14)');
-    U.stop(g4, 1, 'rgba(16,64,84,0)');
+    U.stop(g4, 0, 'rgba(6,10,28,0.22)');
+    U.stop(g4, 1, 'rgba(6,10,28,0)');
     ctx.fillStyle = g4;
     ctx.fillRect(W - FX - 9, TOP, 9, BOT - TOP);
 }
@@ -131,8 +132,8 @@ function drawGlare(ctx) {
  * 屏幕边缘这几个像素不铺满，真机上会留下上一帧的残影。 */
 function base(ctx) {
     var wall = ctx.createLinearGradient(0, 0, 0, H);
-    U.stop(wall, 0, '#f3e0ba');
-    U.stop(wall, 1, '#dcbe8e');
+    U.stop(wall, 0, '#101830');
+    U.stop(wall, 1, '#080d1e');
     ctx.fillStyle = wall;
     ctx.fillRect(0, 0, W, H);
 

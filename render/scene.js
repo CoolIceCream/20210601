@@ -19,9 +19,9 @@ var BOT = C.TANK_BOTTOM;
 function drawSurface(ctx, t) {
     var h = 30;
     var g = ctx.createLinearGradient(0, TOP, 0, TOP + h * 1.9);
-    U.stop(g, 0, 'rgba(255,255,255,0.34)');
-    U.stop(g, 0.45, 'rgba(255,255,255,0.12)');
-    U.stop(g, 1, 'rgba(200,248,255,0)');
+    U.stop(g, 0, 'rgba(232,212,160,0.20)');
+    U.stop(g, 0.45, 'rgba(232,212,160,0.08)');
+    U.stop(g, 1, 'rgba(232,212,160,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(0, TOP - 2);
@@ -40,7 +40,7 @@ function drawSurface(ctx, t) {
         var y2 = TOP + h + Math.sin(x2 * 0.021 + t * 1.7) * 4.5 + Math.sin(x2 * 0.047 - t * 1.15) * 2.4;
         if (x2 === 0) ctx.moveTo(x2, y2); else ctx.lineTo(x2, y2);
     }
-    ctx.strokeStyle = 'rgba(255,255,255,0.72)';
+    ctx.strokeStyle = 'rgba(232,212,160,0.55)';
     ctx.lineWidth = 2.2;
     ctx.stroke();
     ctx.restore();
@@ -70,9 +70,9 @@ function drawLightBeams(ctx, t) {
             var fade = 1 - Math.abs(k) * 0.34;
             var x = cx + k * width * 0.9;
             var g = ctx.createLinearGradient(x, TOP, x + 110, BOT);
-            U.stop(g, 0, 'rgba(255,255,255,' + 0.075 * fade + ')');
-            U.stop(g, 0.5, 'rgba(255,255,255,' + 0.035 * fade + ')');
-            U.stop(g, 1, 'rgba(255,255,255,0)');
+            U.stop(g, 0, 'rgba(200,164,92,' + 0.09 * fade + ')');
+            U.stop(g, 0.5, 'rgba(200,164,92,' + 0.04 * fade + ')');
+            U.stop(g, 1, 'rgba(200,164,92,0)');
             ctx.fillStyle = g;
             ctx.beginPath();
             ctx.moveTo(x - width * 0.6, TOP);
@@ -88,7 +88,7 @@ function drawLightBeams(ctx, t) {
 
 function drawMotes(ctx, decor) {
     ctx.save();
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#e8d4a0';
     for (var i = 0; i < decor.motes.length; i++) {
         var m = decor.motes[i];
         ctx.globalAlpha = m.a;
@@ -113,9 +113,9 @@ function drawPlants(ctx, decor, t, layer) {
         ctx.globalAlpha = alpha;
 
         var g = ctx.createLinearGradient(0, ground, 0, ground - p.h);
-        U.stop(g, 0, U.hsl(p.hue, 66, 34));
-        U.stop(g, 1, U.hsl(p.hue, 84, 58));
-        ctx.fillStyle = g || U.hsl(p.hue, 70, 42);
+        U.stop(g, 0, U.hsl(p.hue, 48, 26));
+        U.stop(g, 1, U.hsl(p.hue, 58, 46));
+        ctx.fillStyle = g || U.hsl(p.hue, 52, 34);
 
         ctx.beginPath();
         ctx.moveTo(p.x - p.w * 0.5, ground + 2);
@@ -124,7 +124,7 @@ function drawPlants(ctx, decor, t, layer) {
         ctx.closePath();
         ctx.fill();
         /* 深绿细描边：卡通风格靠描边立住轮廓 */
-        ctx.strokeStyle = 'rgba(26,88,48,0.55)';
+        ctx.strokeStyle = 'rgba(6,20,16,0.6)';
         ctx.lineWidth = 1.3;
         ctx.stroke();
 
@@ -141,9 +141,9 @@ function drawPlants(ctx, decor, t, layer) {
 
 function drawGround(ctx, decor) {
     var g = ctx.createLinearGradient(0, ground - 20, 0, BOT);
-    U.stop(g, 0, '#fff0c6');
-    U.stop(g, 0.35, '#f3dca6');
-    U.stop(g, 1, '#dbb97c');
+    U.stop(g, 0, '#3a4a63');
+    U.stop(g, 0.35, '#28374e');
+    U.stop(g, 1, '#1a263a');
     ctx.fillStyle = g;
 
     ctx.beginPath();
@@ -161,15 +161,15 @@ function drawGround(ctx, decor) {
         ctx.save();
         ctx.globalAlpha = 0.85;
         var gg = ctx.createLinearGradient(p.x, ground + p.dy - p.r, p.x, ground + p.dy + p.r);
-        U.stop(gg, 0, '#fff3d4');
-        U.stop(gg, 1, '#c2a06a');
+        U.stop(gg, 0, '#51617c');
+        U.stop(gg, 1, '#2b3a52');
         ctx.fillStyle = gg;
         ctx.beginPath();
         U.ellipse(ctx, p.x, ground + p.dy + 3, p.r, p.r * 0.62, 0);
         ctx.fill();
 
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = '#c8a45c';
         ctx.beginPath();
         U.ellipse(ctx, p.x - p.r * 0.24, ground + p.dy - p.r * 0.1, p.r * 0.4, p.r * 0.22, -0.3);
         ctx.fill();
@@ -192,14 +192,14 @@ function drawCorals(ctx, decor, t) {
             var ex = Math.cos(a) * b.len;
             var ey = Math.sin(a) * b.len;
 
-            ctx.strokeStyle = U.hsl(c.hue, 68, 56);
+            ctx.strokeStyle = U.hsl(c.hue, 52, 44);
             ctx.lineWidth = b.w;
             ctx.beginPath();
             ctx.moveTo(0, 0);
             ctx.quadraticCurveTo(ex * 0.35, ey * 0.62, ex, ey);
             ctx.stroke();
 
-            ctx.fillStyle = U.hsl(c.hue, 78, 70);
+            ctx.fillStyle = U.hsl(c.hue, 66, 60);
             ctx.beginPath();
             ctx.arc(ex, ey, b.w * 0.62, 0, 6.2832);
             ctx.fill();
@@ -249,12 +249,45 @@ function drawBubbles(ctx, state) {
     ctx.restore();
 }
 
+/* ---------------- 樱花飘落 ----------------
+ * 纯视觉：位置由 t 与固定相位算出，不需要逻辑层存状态。
+ * 花瓣画成一片带小缺口的椭圆，半透明，缓缓下落并左右摇。 */
+var SAKURA_N = 12;
+function drawSakura(ctx, t) {
+    ctx.save();
+    for (var i = 0; i < SAKURA_N; i++) {
+        var seed = i * 7.31;
+        var speed = 16 + (i % 4) * 6;                    /* 下落速度错开 */
+        var span = BOT - TOP + 40;
+        var yy = TOP - 20 + ((seed * 11 + t * speed) % span);
+        var xx = 18 + ((seed * 37) % (W - 36)) + Math.sin(t * 0.8 + seed) * 14;
+        var scale = 0.7 + (i % 3) * 0.22;
+        var spin = t * 0.9 + seed;
+        var alpha = 0.30 + (i % 3) * 0.12;
+
+        ctx.save();
+        ctx.translate(xx, yy);
+        ctx.rotate(spin);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#e8b8c4';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(-4.5, -3.2, -4.0, -8.5, 0, -7.0);
+        ctx.bezierCurveTo(4.0, -8.5, 4.5, -3.2, 0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+    ctx.restore();
+}
+
 /* 三个缸各自一套背景色调，切缸时一眼能看出换了地方。
  * 差异克制在「同一个水族馆的不同缸」，不做成三个画风。 */
 var TANK_THEME = [
-    ['#d7f9ff', '#8fe4f4', '#41c1da', '#2589a6'],
-    ['#d3fbf0', '#8ce4d2', '#3fb9ba', '#238a99'],
-    ['#dcf3ff', '#94d8f4', '#4cb4e0', '#2680aa']
+    ['#1b3a5e', '#162f4c', '#11253f', '#0d1a30'],  /* 靛蓝庭院 */
+    ['#173f42', '#133538', '#0e2a2c', '#0a1d20'],  /* 墨绿庭院 */
+    ['#28365c', '#1f2c4d', '#17223e', '#101930']   /* 紫墨庭院 */
 ];
 
 /* 场景总绘：按深度顺序铺一遍 */
@@ -287,6 +320,7 @@ function draw(ctx, state, decor) {
     drawFoods(ctx, state);
     fishRender.drawAll(ctx, state);
     drawBubbles(ctx, state);
+    drawSakura(ctx, t);
 
     ctx.restore();
 }

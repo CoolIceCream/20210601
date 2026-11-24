@@ -10,7 +10,10 @@ module.exports = {
     /* 商店 */
     sheetOpen: false,
     sheetEase: 0,
-    sheetTab: 0,        /* 0 = 道具 · 1 = 鱼卵 */
+    sheetTab: 0,        /* 0=商店 1=鱼卵 2=图鉴 3=鱼塘 4=仓库 */
+    codexDetail: null,  /* 图鉴详情条目的序号（0 基），null = 不显示 */
+    bagSel: '',         /* 仓库页当前选中的鱼 id，'' = 没选 */
+    pondTapAt: 0,       /* 上次抛竿时间戳，用来做连点冷却 */
 
     /* 模态弹窗：{ type:'offline', seconds, gain, capped } */
     modal: null,

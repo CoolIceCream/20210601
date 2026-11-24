@@ -10,6 +10,7 @@
 var cfg = require('../config/index.js');
 var platform = require('../platform.js');
 var fishFactory = require('./fish.js');
+var codex = require('./codex.js');
 
 function create() {
     return {
@@ -27,6 +28,7 @@ function create() {
 
         /* ---- 养成 / 设施 ---- */
         foodLv: 1,
+        shellLv: 0,         /* 招财贝壳等级 0-3：卖鱼价 +30/40/50% */
         auto: false,
         corals: 0,
         storageLv: 1,       /* 仓库等级：决定存储上限与离线结算时长 */
@@ -36,6 +38,22 @@ function create() {
         /* ---- 实体 ---- */
         fish: [],
         foods: [],
+
+        /* ---- M9 鱼塘 / 仓库 ----
+         * pondLv  鱼塘等级（1=普通，当前只开这一档）
+         * bag     仓库里的道具计数：鱼饵 / 珍珠贝 / 珍珠
+         * caught  钓到但还没放进鱼缸的鱼（完整鱼对象，tank 无意义） */
+        pondLv: 1,
+        bag: {
+            bait: 0,
+            oyster: 0,
+            pearl: 0
+        },
+        caught: [],
+
+        /* ---- 图鉴收录：曾经拥有过的鱼种（卖掉/被吃也算） ----
+         * { speciesId: { n: 累计条数, t: 首次获得时间 } } */
+        discovered: {},
 
         /* ---- 收益累加器：不足 1 枚的零头先攒着，攒够再入账 ---- */
         acc: {
@@ -81,6 +99,7 @@ function bootstrapFresh() {
     f.x = 195;
     f.y = 300;
     s.fish.push(f);
+    codex.mark(s, f.speciesId);   /* 开局那条鱼也要进图鉴 */
     return s;
 }
 
