@@ -82,7 +82,7 @@ function setup() {
 function center(r) { return Math.round(r.x + r.w / 2); }
 function cY(r) { return Math.round(r.y + r.h / 2); }
 function openCodex(env) {
-    touch.tap(center(L.SHOP_BTN), cY(L.SHOP_BTN), env);
+    touch.tap(center(L.STORE_BTN), cY(L.STORE_BTN), env);
     env.session.sheetEase = 1;
     touch.tap(center(L.tabRect(2, 1)), cY(L.tabRect(2, 1)), env);
 }
@@ -112,14 +112,31 @@ test('买卵开出鱼会收录，重复不重复计数', function () {
     return first.species.name + ' 累计 ' + after + ' 条';
 });
 
-test('传奇卵必出鲨鱼并收录隐藏款', function () {
+test('传奇卵只出鲨鱼或金鲤鱼，两档都进图鉴', function () {
     var s = stateModule.bootstrapFresh();
-    s.coins.fish = 200000;
-    var r = shop.buyEgg(s, 'LEGEND');
-    assert(r.ok, '传奇卵应买得起');
-    assert(r.species.id === 'reef_shark', '应出小鲨鱼');
-    assert(codex.isFound(s, 'reef_shark'), '鲨鱼应进图鉴');
-    return '隐藏款已收录';
+    s.coins.fish = 100000000;
+    var shark = 0;
+    var koi = 0;
+
+    /* M14 起传奇卵是 90/10 两档，单抽一次断言「必出鲨鱼」会 10% 概率翻车。
+     * 这里连续抽到两档都出现（40 次内几乎必然），顺便每次都验库存放。 */
+    for (var i = 0; i < 40 && !(shark && koi); i++) {
+        var r = shop.buyEgg(s, 'LEGEND');
+        assert(r.ok, '传奇卵应买得起：' + (r.reason || ''));
+        var f = s.fish[s.fish.length - 1];
+        if (r.species.id === 'reef_shark') {
+            shark += 1;
+            assert(codex.isFound(s, 'reef_shark'), '鲨鱼应进图鉴');
+        } else if (r.species.id === 'gold_koi') {
+            koi += 1;
+            assert(codex.isFound(s, 'gold_koi'), '金鲤鱼应进图鉴');
+        } else {
+            assert(false, '传奇卵不该开出 ' + r.species.id);
+        }
+        shop.sellFish(s, f.id);   /* 买完就卖，腾鱼位接着抽 */
+    }
+    assert(shark > 0 && koi > 0, '两档产出都该出现过');
+    return '鲨鱼 ' + shark + ' · 金鲤 ' + koi;
 });
 
 test('卖掉鱼后图鉴仍保留收录', function () {

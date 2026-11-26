@@ -10,8 +10,8 @@
  * 抽到贵的就赚得多 —— 这让「买卵」有赌的成分，
  * 但期望始终是正的（卵价 = 平均卖价 × 0.78）。
  *
- * M8 起多一款「传奇鱼卵」：固定 10 万金币，必出小鲨鱼，
- * 不受解锁条件影响；普通鱼卵里仍保留 0.1% 的彩蛋概率。
+ * M8 起多一款「传奇鱼卵」：固定 10 万金币，不受解锁条件影响。
+ * M14 起它拆成两档产出：90% 小鲨鱼 / 10% 金鲤鱼（化龙线的起点）。
  *
  * 价格规则：
  *   道具  base × mul ^ 已购次数
@@ -92,7 +92,9 @@ function statusOf(state, item) {
 
     var desc = item.desc;
     if (item.id === 'bait') {
-        desc = cur > 0 ? ('钓鱼必备 · 现有 ' + cur + ' 个') : '钓鱼必备 · 每次消耗 1 个';
+        desc = cur > 0
+            ? ('钓鱼必备 · 现有 ' + cur + ' 个 · 长按连买')
+            : '钓鱼必备 · 长按可连续买';
     }
     if (item.id === 'shell') {
         var gains = cfg.economy.sell.shellBonus || [1];
@@ -257,13 +259,20 @@ function secretPool(rarity) {
  * 否则 1% 的高价鱼会变成白送的漏洞。 */
 function avgSellOf(rarity) {
     if (isLegend(rarity)) {
-        return fishLib.matureValueOf(fishLib.speciesById(legendCfg().speciesId));
+        var L = legendCfg();
+        var main = fishLib.eggValueOf(fishLib.speciesById(L.speciesId));
+        if (L.bonus && L.bonus.speciesId && L.bonus.rate > 0) {
+            var b = fishLib.eggValueOf(fishLib.speciesById(L.bonus.speciesId));
+            var rate = Math.min(1, Math.max(0, L.bonus.rate));
+            return main * (1 - rate) + b * rate;
+        }
+        return main;
     }
     var pool = rarityPool(rarity);
     if (!pool.total) return 0;
     var sum = 0;
     for (var i = 0; i < pool.list.length; i++) {
-        sum += (pool.list[i].drawWeight || 1) * fishLib.matureValueOf(pool.list[i]);
+        sum += (pool.list[i].drawWeight || 1) * fishLib.eggValueOf(pool.list[i]);
     }
     var avg = sum / pool.total;
 
@@ -271,7 +280,7 @@ function avgSellOf(rarity) {
     var used = 0;
     for (var k = 0; k < secrets.length; k++) {
         var rate = Math.min(1 - used, secrets[k].eggRate);
-        avg = avg * (1 - rate) + fishLib.matureValueOf(secrets[k]) * rate;
+        avg = avg * (1 - rate) + fishLib.eggValueOf(secrets[k]) * rate;
         used += rate;
     }
     return avg;
@@ -302,10 +311,20 @@ function eggStatusOf(state, rarity) {
     if (isLegend(rarity)) {
         var L = legendCfg();
         var sp = fishLib.speciesById(L.speciesId);
-        var val = fishLib.matureValueOf(sp);
+        var val = avgSellOf(rarity);
         var price = eggPriceOf(rarity);
         var full = storage.roomOf(state) <= 0;
         var affordable = !full && wallet.canAfford(state, 'fish', price);
+        var names = [sp.name];
+        var hint = '必出 ' + sp.name;
+        var rate = 0;
+        if (L.bonus && L.bonus.speciesId && L.bonus.rate > 0) {
+            var bs = fishLib.speciesById(L.bonus.speciesId);
+            rate = Math.min(1, Math.max(0, L.bonus.rate));
+            names.push(bs.name);
+            hint = Math.round((1 - rate) * 100) + '% ' + sp.name +
+                ' · ' + Math.round(rate * 100) + '% ' + bs.name;
+        }
         return {
             rarity: rarity,
             price: price,
@@ -313,10 +332,10 @@ function eggStatusOf(state, rarity) {
             minSell: val,
             maxSell: val,
             rep: sp,
-            count: 1,
-            names: [sp.name],
-            secretRate: 0,
-            secretHint: '必出 ' + sp.name,
+            count: names.length,
+            names: names,
+            secretRate: rate,
+            secretHint: hint,
             locked: false,
             full: full,
             need: 0,
@@ -342,7 +361,7 @@ function eggStatusOf(state, rarity) {
     var maxSell = 0;
     var rep = pool.list[0];
     for (var i = 0; i < pool.list.length; i++) {
-        var v = fishLib.matureValueOf(pool.list[i]);
+        var v = fishLib.eggValueOf(pool.list[i]);
         if (v < minSell) minSell = v;
         if (v > maxSell) { maxSell = v; rep = pool.list[i]; }
     }
@@ -380,7 +399,14 @@ function eggList(state) {
 /* 在该品质池里抽一条：先判彩蛋，再按权重抽常规鱼。
  * 彩蛋用独立概率，不受 drawWeight 总和变化影响 —— 想调 1% 就改 eggRate。 */
 function rollInRarity(rarity) {
-    if (isLegend(rarity)) return fishLib.speciesById(legendCfg().speciesId);
+    if (isLegend(rarity)) {
+        var L = legendCfg();
+        /* 传奇卵的主产出 + 第二档（金鲤鱼）：先判 bonus，剩下都是主鱼 */
+        if (L.bonus && L.bonus.speciesId && Math.random() < (L.bonus.rate || 0)) {
+            return fishLib.speciesById(L.bonus.speciesId);
+        }
+        return fishLib.speciesById(L.speciesId);
+    }
     var secrets = secretPool(rarity);
     for (var s = 0; s < secrets.length; s++) {
         if (Math.random() < secrets[s].eggRate) return secrets[s];

@@ -151,7 +151,7 @@ test('鱼卵卡展示隐藏彩蛋：仍显示 3 种，卖价区间不含鲨鱼',
     assert(st.secretHint === '0.1% 隐藏款', '应该提示有 0.1% 隐藏款，实际 ' + st.secretHint);
     assert(st.rep.id !== SHARK, '代言人不该换成鲨鱼');
     var koi = fishLib.speciesById('peach_koi');
-    near(st.maxSell, fishLib.matureValueOf(koi), 0.001, 'R 档最高卖价');
+    near(st.maxSell, fishLib.eggValueOf(koi), 0.001, 'R 档最高卖价（含平均词条期望）');
     return st.count + ' 种 · ' + st.names.join('/');
 });
 
@@ -163,11 +163,11 @@ test('R 卵定价仍把 0.1% 的鲨鱼期望算进去', function () {
     var sum = 0;
     var total = 0;
     for (var i = 0; i < normal.length; i++) {
-        sum += normal[i][1] * fishLib.matureValueOf(fishLib.speciesById(normal[i][0]));
+        sum += normal[i][1] * fishLib.eggValueOf(fishLib.speciesById(normal[i][0]));
         total += normal[i][1];
     }
     var avg = sum / total;
-    avg = avg * 0.999 + fishLib.matureValueOf(fishLib.speciesById(SHARK)) * 0.001;
+    avg = avg * 0.999 + fishLib.eggValueOf(fishLib.speciesById(SHARK)) * 0.001;
     var expected = Math.max(S.step || 5, Math.round(avg * S.eggDiscount / (S.step || 5)) * (S.step || 5));
     assert(shop.eggPriceOf('R') === expected,
         '卵价应为 ' + expected + '，实际 ' + shop.eggPriceOf('R'));
@@ -187,27 +187,37 @@ test('买 R 卵能开出鲨鱼，飘字报出名字', function () {
     return last.text;
 });
 
-test('传奇鱼卵：固定 10 万金币，无解锁门槛，必出小鲨鱼', function () {
+test('传奇鱼卵：10 万金币，90% 小鲨鱼 + 10% 金鲤鱼', function () {
     var s = fresh();
     s.coins.fish = 100000;
     var st = shop.eggStatusOf(s, 'LEGEND');
     assert(st.price === 100000, '价格应为 100000，实际 ' + st.price);
     assert(!st.locked && st.need === 0, '传奇卵不该锁');
-    assert(st.count === 1 && st.rep.id === SHARK, '只该有一条代表鱼且是鲨鱼');
-    assert(st.secretHint === '必出 小鲨鱼', '卡片该直说必出，实际 ' + st.secretHint);
+    assert(st.count === 2, 'M14 起传奇卵有两种产出，实际 ' + st.count);
+    assert(st.secretHint.indexOf('10%') >= 0, '卡片该写出 10% 金鲤鱼，实际 ' + st.secretHint);
 
-    for (var i = 0; i < 50; i++) {
-        assert(shop.rollInRarity('LEGEND').id === SHARK, '传奇卵必须开出鲨鱼');
+    /* 概率分布：2000 次里金鲤鱼应落在 6%~15% */
+    var koi = 0;
+    var shark = 0;
+    for (var i = 0; i < 2000; i++) {
+        var sp = shop.rollInRarity('LEGEND');
+        if (sp.id === 'gold_koi') koi += 1;
+        else if (sp.id === SHARK) shark += 1;
+        else assert(false, '传奇卵不该开出 ' + sp.id);
     }
+    var rate = koi / 2000;
+    assert(rate > 0.06 && rate < 0.15,
+        '金鲤鱼概率应在 10% 附近，实测 ' + (rate * 100).toFixed(1) + '%');
+    assert(shark + koi === 2000, '两档产出要覆盖全部');
 
     var before = s.coins.fish;
     var r = shop.buyEgg(s, 'LEGEND');
     assert(r.ok, '买传奇卵应成功：' + r.reason);
-    assert(r.species.id === SHARK, '应该开出小鲨鱼');
+    assert(r.species.id === SHARK || r.species.id === 'gold_koi', '只能出鲨鱼或金鲤鱼');
     assert(r.price === 100000, '应扣 10 万');
     assert(before - s.coins.fish === 100000, '余额应正好少 10 万');
-    assert(s.fish[s.fish.length - 1].speciesId === SHARK, '鲨鱼应进缸');
-    return '10 万 → ' + r.species.name + ' · 余额 ' + s.coins.fish;
+    assert(s.fish[s.fish.length - 1].speciesId === r.species.id, '开出的鱼应进缸');
+    return '10 万 → ' + r.species.name + ' · 金鲤鱼 ' + (rate * 100).toFixed(1) + '%';
 });
 
 test('鱼卵货架共四款，传奇卵排在最后', function () {

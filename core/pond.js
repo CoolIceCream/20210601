@@ -105,9 +105,24 @@ function buyBait(state, n) {
  *   { ok:true, type:'oyster', total }           钓到珍珠贝
  *   { ok:true, type:'fish', species, fish, total } 钓到鱼
  */
+/* 鱼篓上限：配置值，但永远不小于当前条数 ——
+ * 老存档里可能已经装了 40 条，不能一读档就再也钓不了鱼 */
+function bagCapOf(state) {
+    var cap = (cfg.economy && cfg.economy.bagCap) || 20;
+    var n = caughtCount(state);
+    return n > cap ? n : cap;
+}
+
+function isBagFull(state) {
+    return caughtCount(state) >= bagCapOf(state);
+}
+
 function cast(state) {
     if (baitOf(state) < ((P().bait && P().bait.perCatch) || 1)) {
         return { ok: false, reason: 'no_bait' };
+    }
+    if (isBagFull(state)) {
+        return { ok: false, reason: 'bag_full' };
     }
     var sp = rollFish(state);
     if (!sp) return { ok: false, reason: 'no_pool' };
@@ -120,7 +135,7 @@ function cast(state) {
         return { ok: true, type: 'oyster', total: oysterOf(state) };
     }
 
-    var f = fishLib.create(sp.id, { growth: rollGrowth() });
+    var f = fishLib.create(sp.id, { growth: rollGrowth(), rollTraits: true });
     state.caught.push(f);
     codex.mark(state, sp.id);   /* 钓到就算图鉴收录过 */
     return { ok: true, type: 'fish', species: sp, fish: f, total: caughtCount(state) };
@@ -150,6 +165,44 @@ function sellPearl(state) {
 
 /* ---------------- 仓库里的鱼 ---------------- */
 
+/* ---------------- 缸里的鱼捞出到仓库（M14） ----------------
+ * 主界面点鱼弹出的信息卡上只有一个「捞出」按钮：
+ * 把这条鱼从当前缸搬到仓库，鱼位立刻空出来。
+ * 仓库里可以再放回别的缸、直接卖、或者拿去繁育。
+ *
+ * 为什么把「卖出」从主界面撤掉：
+ *   原来点鱼头顶的价签就直接成交，误触一次鱼就没了；
+ *   现在统一走「捞出 → 仓库 → 卖」，多一步但不会被点掉。
+ */
+function dumpToBag(state, fishId) {
+    var act = state.activeTank || 0;
+    var idx = -1;
+    for (var i = 0; i < state.fish.length; i++) {
+        var f = state.fish[i];
+        if (f.id === fishId && (f.tank || 0) === act) { idx = i; break; }
+    }
+    if (idx < 0) return { ok: false, reason: 'gone' };
+
+    var fish = state.fish.splice(idx, 1)[0];
+    var sp = fishLib.speciesById(fish.speciesId);
+
+    /* 仓库里的鱼没有位置概念，清掉坐标，放回缸时由 ensurePlacement 重新摆 */
+    fish.tank = 0;
+    fish.x = 0;
+    fish.y = 0;
+    state.caught.push(fish);
+
+    if (state.view && state.view.selFish === fishId) state.view.selFish = '';
+
+    return {
+        ok: true,
+        fish: fish,
+        species: sp,
+        name: sp.name,
+        total: state.caught.length
+    };
+}
+
 /* 仓库鱼 → 鱼缸：找得到空位才搬，找不到返回 full */
 function moveToTank(state, fishId) {
     var idx = -1;
@@ -171,8 +224,7 @@ function moveToTank(state, fishId) {
     return { ok: true, tank: slot };
 }
 
-/* 仓库鱼直接卖：和缸里卖鱼同价（含招财贝壳加成） */
-function sellCaught(state, fishId) {
+/* 仓库鱼直接卖：和缸里卖鱼同价（含招财贝壳加成） */function sellCaught(state, fishId) {
     var idx = -1;
     for (var i = 0; i < state.caught.length; i++) {
         if (state.caught[i].id === fishId) { idx = i; break; }
@@ -203,6 +255,45 @@ function caughtList(state) {
     return out;
 }
 
+/* ---------------- 批量操作（仓库多选） ----------------
+ * 单条和批量走同一套底层函数，避免「单选一个价、批量另一个价」。
+ * 鱼位不够时能搬几条搬几条，剩下的仍留在仓库，不做半途回滚。 */
+
+function moveManyToTank(state, ids) {
+    var moved = 0;
+    var full = 0;
+    var gone = 0;
+    for (var i = 0; i < ids.length; i++) {
+        var r = moveToTank(state, ids[i]);
+        if (r.ok) {
+            moved += 1;
+        } else if (r.reason === 'full') {
+            /* 鱼位是按缸算的，一旦满了后面的也都放不下，直接停手 */
+            full = ids.length - i;
+            break;
+        } else {
+            gone += 1;
+        }
+    }
+    return { ok: moved > 0, moved: moved, full: full, gone: gone };
+}
+
+function sellManyCaught(state, ids) {
+    var count = 0;
+    var total = 0;
+    var gone = 0;
+    for (var i = 0; i < ids.length; i++) {
+        var r = sellCaught(state, ids[i]);
+        if (r.ok) {
+            count += 1;
+            total += r.price;
+        } else {
+            gone += 1;
+        }
+    }
+    return { ok: count > 0, count: count, total: total, gone: gone };
+}
+
 /* 鱼塘页要展示的全部状态 */
 function statusOf(state) {
     var L = curLevel(state);
@@ -225,6 +316,8 @@ function statusOf(state) {
 
 module.exports = {
     baitOf: baitOf,
+    bagCapOf: bagCapOf,
+    isBagFull: isBagFull,
     oysterOf: oysterOf,
     pearlOf: pearlOf,
     caughtCount: caughtCount,
@@ -236,8 +329,11 @@ module.exports = {
     cast: cast,
     breakOyster: breakOyster,
     sellPearl: sellPearl,
+    dumpToBag: dumpToBag,
     moveToTank: moveToTank,
     sellCaught: sellCaught,
+    moveManyToTank: moveManyToTank,
+    sellManyCaught: sellManyCaught,
     caughtList: caughtList,
     statusOf: statusOf
 };

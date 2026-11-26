@@ -49,6 +49,9 @@ function findPrey(state, hunter) {
         if (o === hunter || o.eaten) continue;
         if ((o.tank || 0) !== (hunter.tank || 0)) continue;
         if (isPredator(o)) continue;
+        /* 带龙鳞的金鲤鱼是化龙的种子（传奇卵 10% + 55% 才凑齐），
+         * 被 AI 一口吞掉太伤，直接列为不可捕食。普通金鲤鱼照吃。 */
+        if (o.speciesId === 'gold_koi' && fishLib.hasTrait(o, 'dragon_scale')) continue;
 
         if (!hasPos || !isFinite(o.x) || !isFinite(o.y)) {
             if (!best) best = o;

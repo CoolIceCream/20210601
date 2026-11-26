@@ -158,6 +158,7 @@ function loop(ts) {
     }, false);
 
     /* 界面动画 + 绘制 */
+    diag.guard('hold', function () { touch.step(env, dt); });
     diag.guard('session', function () { renderer.stepSession(session, dt); });
     renderer.draw(env.state, session, dt);
 

@@ -6,6 +6,8 @@
  *   鱼饵：买（10/个、数量累加、钱不够拦截）、抛竿消耗 1、无饵拦截
  *   钓鱼：产出鱼或珍珠贝（概率区间）、鱼种属于 R 档、成长随机且偏小
  *   仓库：鱼进仓库、放缸（空位/满位）、直接卖（含贝壳加成）
+ *   批量：全选 / 清空、多选卖鱼一次入账、鱼位不足只放一部分
+ *   鱼饵：短按买 1、长按连买、没钱自动停手
  *   珍珠：打破珍珠贝 50%、珍珠卖 1 万
  *   存档：往返保留 pondLv/bag/caught、老档补默认
  *   渲染：鱼塘页 / 仓库页整帧不报错
@@ -55,6 +57,7 @@ var wallet = require('../core/wallet.js');
 var C = require('../render/canvas.js');
 var L = require('../ui/layout.js');
 var touch = require('../ui/touch.js');
+var sheetRender = require('../render/sheet.js');
 var session = require('../ui/session.js');
 var sim = require('../core/sim.js');
 
@@ -66,9 +69,11 @@ function setup() {
     session.sheetEase = 0;
     session.sheetTab = 0;
     session.codexDetail = null;
+    session.bagTab = 2;
     session.modal = null;
     session.toast = null;
-    session.bagSel = '';
+    session.bagSels = [];
+    session.bagMode = false;
     session.pondTapAt = 0;
     session.debug.open = false;
     session.debug.tapTimes.length = 0;
@@ -80,7 +85,7 @@ function setup() {
 }
 /* 打开面板并切到指定页签（ease 直接置 1，跳过展开动画） */
 function openTab(env, tab) {
-    touch.tap(center(L.SHOP_BTN), cY(L.SHOP_BTN), env);
+    touch.tap(center(L.STORE_BTN), cY(L.STORE_BTN), env);
     env.session.sheetEase = 1;
     touch.tap(center(L.tabRect(tab, 1)), cY(L.tabRect(tab, 1)), env);
 }
@@ -185,9 +190,12 @@ test('抛竿产出 鱼/珍珠贝，珍珠贝约 15%', function () {
     var fishN = 0, oysterN = 0;
     for (var i = 0; i < 400; i++) {
         var r = pond.cast(s);
-        assert(r.ok, '第 ' + i + ' 次抛竿应成功');
-        if (r.type === 'fish') fishN += 1;
-        else oysterN += 1;
+        assert(r.ok, '第 ' + i + ' 次抛竿应成功（' + (r.reason || '') + '）');
+        if (r.type === 'fish') {
+            fishN += 1;
+            /* 鱼篓有 20 格上限，采样完立刻清空，不然第 21 次会被拦 */
+            s.caught.length = 0;
+        } else oysterN += 1;
     }
     assert(fishN > 0 && oysterN > 0, '两种产出都应出现');
     /* 期望 15%，400 次约 60；放宽到 10%~22% 以容忍随机波动 */
@@ -203,20 +211,52 @@ test('钓到的鱼属于 R 档、进仓库、成长偏小', function () {
 
     var growths = [];
     for (var i = 0; i < 200; i++) {
+        var before = pond.caughtCount(s);
         var r = pond.cast(s);
         if (r.type !== 'fish') continue;
         assert(r.species.rarity === 'R', '普通塘只能钓 R 档，得到 ' + r.species.rarity);
         assert(r.fish.growth >= cfg.pond.growth.min - 0.01 &&
             r.fish.growth <= cfg.pond.growth.max + 0.01, '成长应在区间内');
+        assert(pond.caughtCount(s) === before + 1, '钓到的鱼应立刻进仓库');
         growths.push(r.fish.growth);
+        s.caught.length = 0;   /* 采样完清掉，别撞 20 格上限 */
     }
     assert(growths.length > 20, '应钓到足够多的鱼采样');
-    assert(pond.caughtCount(s) === growths.length, '钓到的鱼应全进仓库');
 
     growths.sort(function (a, b) { return a - b; });
     var median = growths[Math.floor(growths.length / 2)];
     assert(median < 55, '成长中位数应偏小（<55），实际 ' + median.toFixed(1));
     return '样本 ' + growths.length + ' · 中位 ' + median.toFixed(1);
+});
+
+/* ---------------- 鱼篓上限 ---------------- */
+
+test('鱼篓满 20 条后抛竿被拦，卖一条又能钓', function () {
+    var s = fresh();
+    pond.buyBait(s, 40);
+    while (pond.caughtCount(s) < pond.bagCapOf(s)) {
+        s.caught.push(fishLib.create(cfg.species[0].id, { growth: 30 }));
+    }
+    assert(pond.bagCapOf(s) === 20, '默认上限应是 20，实际 ' + pond.bagCapOf(s));
+
+    var r = pond.cast(s);
+    assert(!r.ok && r.reason === 'bag_full', '满了应返回 bag_full，实际 ' + (r.reason || 'ok'));
+
+    var one = s.caught[0].id;
+    pond.sellCaught(s, one);
+    assert(pond.caughtCount(s) === 19, '卖一条后应剩 19');
+    var r2 = pond.cast(s);
+    assert(r2.ok || r2.reason !== 'bag_full', '腾出位置后应能继续钓');
+    return '满 20 拦截 · 卖 1 条恢复';
+});
+
+test('老存档里鱼比上限多时，上限自动放宽到实际条数', function () {
+    var s = fresh();
+    for (var i = 0; i < 30; i++) {
+        s.caught.push(fishLib.create(cfg.species[0].id, { growth: 30 }));
+    }
+    assert(pond.bagCapOf(s) === 30, '上限应放宽到 30，实际 ' + pond.bagCapOf(s));
+    return '30 条 → 上限 30';
 });
 
 /* ---------------- 仓库：放缸 / 卖 ---------------- */
@@ -362,12 +402,12 @@ test('鱼塘页整帧渲染不报错', function () {
     session.sheetTab = 3;
     session.codexDetail = null;
     session.modal = null;
-    session.bagSel = '';
+    session.bagSels = [];
     require('../render/index.js').draw(sharedCtx, s, session);
     return '整帧渲染通过';
 });
 
-test('仓库页整帧渲染不报错（含选中鱼）', function () {
+test('仓库页整帧渲染不报错（三个子页各画一帧）', function () {
     var session = require('../ui/session.js');
     var C = require('../render/canvas.js');
     var s = fresh();
@@ -375,6 +415,10 @@ test('仓库页整帧渲染不报错（含选中鱼）', function () {
     s.bag.oyster = 2;
     s.bag.pearl = 1;
     s.bag.bait = 4;
+    s.hatchery.push({
+        id: 'h1', speciesId: 'gold_fish', sex: 'f', traits: [{ id: 'gold_scale', lv: 2 }],
+        startAt: Date.now() - 20000, hatchAt: Date.now() + 160000, seconds: 180, twin: true
+    });
     var f = fishLib.create(cfg.species[2].id, { growth: 88 });
     s.caught.push(f);
     s.caught.push(fishLib.create(cfg.species[0].id, { growth: 20 }));
@@ -383,9 +427,17 @@ test('仓库页整帧渲染不报错（含选中鱼）', function () {
     session.sheetTab = 4;
     session.codexDetail = null;
     session.modal = null;
-    session.bagSel = f.id;
-    require('../render/index.js').draw(sharedCtx, s, session);
-    return '整帧渲染通过';
+    session.bagSels = [f.id];
+
+    var renderer = require('../render/index.js');
+    var notes = [];
+    for (var i = 0; i < 3; i++) {
+        session.bagTab = i;
+        renderer.draw(sharedCtx, s, session);
+        notes.push(['鱼卵', '道具', '鱼'][i]);
+    }
+    session.bagTab = 2;
+    return notes.join(' / ') + ' 各一帧通过';
 });
 
 /* ---------------- 触摸 ---------------- */
@@ -414,44 +466,297 @@ test('触摸：无鱼饵点抛竿只提示、不扣', function () {
     return '提示 ' + (env.session.toast ? env.session.toast.text : '');
 });
 
-test('触摸：仓库点鱼选中', function () {
+test('触摸：仓库点格子选中，详情卡出现操作按钮', function () {
     var env = setup();
     var f = fishLib.create(cfg.species[0].id, { growth: 50 });
     env.state.caught.push(f);
     openTab(env, 4);
     assert(env.session.sheetTab === 4, '应切到仓库页');
 
-    var r = L.bagFishRect(0, 1);
+    var r = L.bagCellRect(0, 1);
     touch.tap(center(r), cY(r), env);
-    assert(env.session.bagSel === f.id, '应选中这条鱼，实际 ' + env.session.bagSel);
-    return '选中 ' + f.id;
+    assert(env.session.bagSels[0] === f.id, '应选中这条鱼，实际 ' + env.session.bagSels.join(','));
+
+    /* 选中后详情卡应该给出「放缸 / 卖出」两枚按钮 */
+    var acts = sheetRender.bagActionsOf(env.state, env.session);
+    assert(acts.length === 2, '应有 2 枚按钮，实际 ' + acts.length);
+    assert(acts[0].key === 'tank' && acts[1].key === 'sell', '按钮顺序应是放缸 / 卖出');
+    return '选中 ' + f.id + ' · 按钮 ' + acts.length;
 });
 
-test('触摸：选中后点放入鱼缸', function () {
+test('触摸：再点同一格取消选中', function () {
+    var env = setup();
+    env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 50 }));
+    openTab(env, 4);
+
+    var r = L.bagCellRect(0, 1);
+    touch.tap(center(r), cY(r), env);
+    assert(env.session.bagSels.length === 1, '第一下应选中');
+    touch.tap(center(r), cY(r), env);
+    assert(env.session.bagSels.length === 0, '第二下应取消，实际 ' + env.session.bagSels.length);
+    return '选中 → 取消';
+});
+
+test('触摸：点详情卡「放进鱼缸」，鱼从仓库进缸', function () {
     var env = setup();
     var f = fishLib.create(cfg.species[0].id, { growth: 50 });
     env.state.caught.push(f);
     openTab(env, 4);
 
-    var r = L.bagFishRect(0, 1);
+    var r = L.bagCellRect(0, 1);
     touch.tap(center(r), cY(r), env);
-    var a = L.bagActionRect(0, 1);
-    touch.tap(center(a), cY(a), env);
+
+    var b = L.bagDetailBtnRect(0, 2, 1);
+    touch.tap(center(b), cY(b), env);
 
     assert(env.state.caught.length === 0, '仓库应变空');
     assert(env.state.fish.length === 2, '鱼缸应变 2 条（开局 1 + 放入 1），实际 ' + env.state.fish.length);
-    assert(env.session.bagSel === '', '放入后应清空选中');
+    assert(env.session.bagSels.length === 0, '放入后应清空选中');
     return '进缸 OK';
 });
 
-test('触摸：点珍珠贝卡打破消耗一个', function () {
+test('触摸：点详情卡「卖出」，仓库少一条、钱到账', function () {
+    var env = setup();
+    var f = fishLib.create(cfg.species[0].id, { growth: 100 });
+    env.state.caught.push(f);
+    openTab(env, 4);
+
+    var price = pond.caughtList(env.state)[0].price;
+    var before = env.state.coins.fish;
+
+    var r = L.bagCellRect(0, 1);
+    touch.tap(center(r), cY(r), env);
+    var b = L.bagDetailBtnRect(1, 2, 1);
+    touch.tap(center(b), cY(b), env);
+
+    assert(env.state.caught.length === 0, '仓库应清空');
+    assert(env.state.coins.fish === before + price, '应入账 ' + price);
+    return '+' + price;
+});
+
+test('触摸：道具子页选中珍珠贝，点「打破」消耗一个', function () {
     var env = setup();
     env.state.bag.oyster = 1;
     openTab(env, 4);
-    var r = L.bagItemRect(0, 1);
-    touch.tap(center(r), cY(r), env);
+
+    /* 仓库拆成 鱼卵 / 道具 / 鱼 三页，珍珠贝在「道具」页 */
+    var tr = L.bagTabRect(1, 1);
+    touch.tap(center(tr), cY(tr), env);
+    assert(env.session.bagTab === 1, '应切到道具子页，实际 ' + env.session.bagTab);
+
+    var c = L.bagCellRect(0, 1);
+    touch.tap(center(c), cY(c), env);
+    assert(env.session.bagSels[0] === 'item:oyster', '应选中珍珠贝，实际 ' + env.session.bagSels.join(','));
+
+    var b = L.bagDetailBtnRect(0, 1, 1);
+    touch.tap(center(b), cY(b), env);
     assert(env.state.bag.oyster === 0, '打破后珍珠贝应归 0，实际 ' + env.state.bag.oyster);
     return 'oyster 1 → 0';
+});
+
+test('触摸：仓库默认落在「鱼」子页，三个子页可来回切', function () {
+    var env = setup();
+    openTab(env, 4);
+    assert(env.session.bagTab === 2, '默认应停在鱼子页，实际 ' + env.session.bagTab);
+
+    var notes = [];
+    var names = ['鱼卵', '道具', '鱼'];
+    for (var i = 0; i < 3; i++) {
+        var tr = L.bagTabRect(i, 1);
+        touch.tap(center(tr), cY(tr), env);
+        assert(env.session.bagTab === i, '应切到 ' + names[i] + ' 子页，实际 ' + env.session.bagTab);
+        notes.push(names[i] + '=' + env.session.bagTab);
+    }
+    return notes.join(' · ');
+});
+
+/* ---------------- 仓库批量选择 ---------------- */
+
+test('触摸：全选选中全部格子，再点清空', function () {
+    var env = setup();
+    env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 40 }));
+    env.state.caught.push(fishLib.create(cfg.species[1].id, { growth: 60 }));
+    openTab(env, 4);
+
+    var sr = L.bagChipRect(1, 1);
+    touch.tap(center(sr), cY(sr), env);
+    assert(env.session.bagSels.length === 2, '全选应选中 2 条，实际 ' + env.session.bagSels.length);
+    assert(env.session.bagMode === true, '全选应顺带打开批量模式');
+
+    touch.tap(center(sr), cY(sr), env);
+    assert(env.session.bagSels.length === 0, '再点一次应清空');
+    return '全选 2 → 清空 0';
+});
+
+test('触摸：全选 12 条后批量卖出，一次入账', function () {
+    var env = setup();
+    for (var i = 0; i < 12; i++) {
+        env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 30 + i }));
+    }
+    openTab(env, 4);
+
+    var total = 0;
+    var list = pond.caughtList(env.state);
+    for (var k = 0; k < list.length; k++) total += list[k].price;
+    var before = env.state.coins.fish;
+
+    var sr = L.bagChipRect(1, 1);
+    touch.tap(center(sr), cY(sr), env);
+    assert(env.session.bagSels.length === 12, '全选应覆盖 12 条，实际 ' + env.session.bagSels.length);
+
+    var b = L.bagDetailBtnRect(1, 2, 1);   /* 批量模式：右键 = 批量卖出 */
+    touch.tap(center(b), cY(b), env);
+    assert(env.state.caught.length === 0, '应把 12 条全部卖掉，实际剩 ' + env.state.caught.length);
+    assert(env.state.coins.fish === before + total, '应一次入账 ' + total);
+    return '12 条全选 → 全卖 +' + total;
+});
+
+test('触摸：开批量后连点两格 = 加选，不互相替换', function () {
+    var env = setup();
+    env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 100 }));
+    env.state.caught.push(fishLib.create(cfg.species[1].id, { growth: 100 }));
+    openTab(env, 4);
+
+    var chip = L.bagChipRect(0, 1);
+    touch.tap(center(chip), cY(chip), env);
+    assert(env.session.bagMode === true, '应进入批量模式');
+
+    var r0 = L.bagCellRect(0, 1);
+    var r1 = L.bagCellRect(1, 1);
+    touch.tap(center(r0), cY(r0), env);
+    touch.tap(center(r1), cY(r1), env);
+    assert(env.session.bagSels.length === 2, '应选中 2 条，实际 ' + env.session.bagSels.length);
+
+    var total = pond.caughtList(env.state)[0].price + pond.caughtList(env.state)[1].price;
+    var before = env.state.coins.fish;
+    var b = L.bagDetailBtnRect(1, 2, 1);
+    touch.tap(center(b), cY(b), env);
+
+    assert(env.state.caught.length === 0, '仓库应清空');
+    assert(env.state.coins.fish === before + total, '应入账 ' + total);
+    return '2 条 +' + total;
+});
+
+test('触摸：批量放缸，鱼位不够的留在仓库', function () {
+    var env = setup();
+    /* 只留 1 个鱼位 */
+    while (storage.roomOf(env.state) > 1) {
+        env.state.fish.push(fishLib.create(cfg.species[0].id, { growth: 50, tank: 0 }));
+    }
+    env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 40 }));
+    env.state.caught.push(fishLib.create(cfg.species[1].id, { growth: 60 }));
+    openTab(env, 4);
+
+    var sr = L.bagChipRect(1, 1);
+    touch.tap(center(sr), cY(sr), env);
+    var b = L.bagDetailBtnRect(0, 2, 1);
+    touch.tap(center(b), cY(b), env);
+
+    assert(env.state.caught.length === 1, '应只放进去 1 条，剩 1 条，实际剩 ' + env.state.caught.length);
+    assert(storage.roomOf(env.state) === 0, '鱼缸应刚好填满');
+    assert(env.session.toast && env.session.toast.text.indexOf('剩') >= 0,
+        '应提示还有剩余，实际 ' + (env.session.toast ? env.session.toast.text : '无'));
+    return '放入 1 · 剩 1';
+});
+
+test('触摸：退出批量模式会清空多选', function () {
+    var env = setup();
+    env.state.caught.push(fishLib.create(cfg.species[0].id, { growth: 40 }));
+    openTab(env, 4);
+
+    var chip = L.bagChipRect(0, 1);
+    touch.tap(center(chip), cY(chip), env);
+    var r0 = L.bagCellRect(0, 1);
+    touch.tap(center(r0), cY(r0), env);
+    assert(env.session.bagSels.length === 1, '应先选中 1 条');
+
+    touch.tap(center(chip), cY(chip), env);
+    assert(env.session.bagMode === false, '应退出批量');
+    assert(env.session.bagSels.length === 0, '退出时选择应清空');
+    return '批量关 → 选择清空';
+});
+
+/* ---------------- 鱼饵长按连买 ---------------- */
+
+test('触摸：短按鱼饵购买键只买 1 个', function () {
+    var env = setup();
+    env.state.coins.fish = 500;
+    openTab(env, 0);
+    var list = shop.list(env.state);
+    var idx = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].item.id === 'bait') idx = i;
+    var br = L.buyRect(idx, 1);
+    var x = center(br);
+    var y = cY(br);
+
+    touch.press(x, y, env);
+    assert(touch.release(env) === false, '短按不该标记成长按');
+    touch.tap(x, y, env);
+    assert(pond.baitOf(env.state) === 1, '短按应只买 1 个，实际 ' + pond.baitOf(env.state));
+    return '1 个 / 扣 10';
+});
+
+test('触摸：长按鱼饵购买键连续买，抬手不再多买', function () {
+    var env = setup();
+    env.state.coins.fish = 500;
+    openTab(env, 0);
+    var list = shop.list(env.state);
+    var idx = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].item.id === 'bait') idx = i;
+    var br = L.buyRect(idx, 1);
+    var x = center(br);
+    var y = cY(br);
+
+    var realNow = Date.now;
+    var t = 5000000;
+    Date.now = function () { return t; };
+    try {
+        touch.press(x, y, env);
+        t += 340;
+        touch.step(env, 0.016);
+        assert(pond.baitOf(env.state) === 1, '按住 320ms 应买第 1 个，实际 ' + pond.baitOf(env.state));
+        t += 120;
+        touch.step(env, 0.016);
+        t += 120;
+        touch.step(env, 0.016);
+        assert(pond.baitOf(env.state) === 3, '应连着买到 3 个，实际 ' + pond.baitOf(env.state));
+        assert(env.state.coins.fish === 470, '应扣 30 金币，实际水位 ' + env.state.coins.fish);
+
+        assert(touch.release(env) === true, '长按出过手，抬手应被吞掉');
+        assert(pond.baitOf(env.state) === 3, '抬手不该再多买');
+    } finally {
+        Date.now = realNow;
+    }
+    return '长按 3 个 / 扣 30';
+});
+
+test('触摸：长按到没钱自动停手', function () {
+    var env = setup();
+    env.state.coins.fish = 25;
+    openTab(env, 0);
+    var list = shop.list(env.state);
+    var idx = 0;
+    for (var i = 0; i < list.length; i++) if (list[i].item.id === 'bait') idx = i;
+    var br = L.buyRect(idx, 1);
+    var x = center(br);
+    var y = cY(br);
+
+    var realNow = Date.now;
+    var t = 6000000;
+    Date.now = function () { return t; };
+    try {
+        touch.press(x, y, env);
+        for (var k = 0; k < 10; k++) {
+            t += 120;
+            touch.step(env, 0.016);
+        }
+        assert(pond.baitOf(env.state) === 2, '25 金币只够 2 个，实际 ' + pond.baitOf(env.state));
+        assert(env.state.coins.fish === 5, '应剩 5 金币，实际 ' + env.state.coins.fish);
+        touch.release(env);
+    } finally {
+        Date.now = realNow;
+    }
+    return '2 个 · 余 5';
 });
 
 /* ---------------- 汇总 ---------------- */

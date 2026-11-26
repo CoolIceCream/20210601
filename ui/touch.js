@@ -1,7 +1,7 @@
 /* ============================================================
  * ui/touch.js · 触摸分发
  *
- * 优先级：调试面板 > 弹窗 > 商店 > 底部按钮 > 撒食。
+ * 优先级：弹窗 / 系统层 > 调试面板 > 面板 > 底栏五入口 > 点鱼 > 撒食。
  * 只做路由，具体动作调 core/sim.js。
  * ============================================================ */
 
@@ -10,15 +10,95 @@ var U = require('../render/util.js');
 var L = require('./layout.js');
 var modalRender = require('../render/modal.js');
 var sellRender = require('../render/sell.js');
+var sheetRender = require('../render/sheet.js');
 var debugPanel = require('./debug-panel.js');
 var shop = require('../core/shop.js');
 var pondCore = require('../core/pond.js');
+var breedCore = require('../core/breed.js');
+var dragonCore = require('../core/dragon.js');
 var storage = require('../core/storage.js');
 var fishLib = require('../core/fish.js');
 var wallet = require('../core/wallet.js');
 var platform = require('../platform.js');
 var cfg = require('../config/index.js');
 var view = require('./view.js');
+
+/* ---- 长按连买（M10）----
+ * 只在「商店 → 鱼饵」那一个购买键上生效：
+ * 按住 320ms 开始，之后每 110ms 买一个，钱不够自动停。
+ * 长按触发过就不再走普通点击，避免抬手时又多买一个。 */
+var HOLD_MS = 320;
+var HOLD_REPEAT_MS = 110;
+var hold = null;   /* { x, y, at, last, active, fired } */
+
+/* 当前页签下鱼饵购买键的矩形；不在商店/买不起/已满时返回 null */
+function baitBuyRect(session, state) {
+    if (!session.sheetOpen || session.sheetTab !== 0) return null;
+    var list = shop.list(state);
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].item.id !== 'bait') continue;
+        if (list[i].disabled) return null;
+        return L.buyRect(i, session.sheetEase);
+    }
+    return null;
+}
+
+function buyBaitOnce(env) {
+    env.state.view.vp = C.viewport;
+    var r = env.sim.buy(env.state, 'bait');
+    if (!r.ok) {
+        if (r.reason === 'poor') env.session.showToast('鱼币不够，停止购买');
+        return false;
+    }
+    return true;
+}
+
+/**
+ * 按下：只有落在鱼饵购买键上才进入长按待命状态。
+ * 手势层和测试都走这里，保证测的是同一条路。
+ */
+function press(x, y, env) {
+    var br = baitBuyRect(env.session, env.state);
+    hold = (br && U.inRect(x, y, br))
+        ? { ox: x, oy: y, x: x, y: y, at: platform.now(), last: 0, active: false, fired: false }
+        : null;
+}
+
+/**
+ * 抬手：返回 true 表示这次长按已经连买过，
+ * 调用方应吞掉本次点击，避免又多买一个。
+ */
+function release() {
+    var fired = !!(hold && hold.fired);
+    hold = null;
+    return fired;
+}
+
+/* 每帧由 boot.js 的主循环调用，负责长按的计时与连发 */
+function step(env, dt) {
+    if (!hold) return;
+
+    var session = env.session;
+    var state = env.state;
+    var r = baitBuyRect(session, state);
+    if (!r || !U.inRect(hold.x, hold.y, r)) { hold = null; return; }
+
+    var now = platform.now();
+    if (!hold.active) {
+        if (now - hold.at < HOLD_MS) return;
+        hold.active = true;
+        hold.fired = true;
+        hold.last = now;
+        if (!buyBaitOnce(env)) { hold = null; return; }
+        session.showToast('连续购买中 · 鱼饵 ×' + state.bag.bait);
+        return;
+    }
+
+    if (now - hold.last >= HOLD_REPEAT_MS) {
+        hold.last = now;
+        if (!buyBaitOnce(env)) { hold = null; }
+    }
+}
 
 /* 点到了哪条鱼：命中半径比视觉尺寸小一圈，避免点水面撒食时误选 */
 function pickFish(state, x, y) {
@@ -44,31 +124,72 @@ function pickFish(state, x, y) {
     return best;
 }
 
+/* 信息卡上的「捞出」：把鱼从缸里搬到仓库，鱼位立刻空出来 */
+function doDump(env, fishId) {
+    var r = pondCore.dumpToBag(env.state, fishId);
+    if (!r.ok) {
+        env.session.showToast('这条鱼已经不在了');
+        return;
+    }
+    env.session.showToast('捞出 ' + r.name + ' · 已放进仓库');
+}
+
+/* 信息卡上的「吞噬」：吃掉一条同族金鲤鱼，升一阶 */
+function doDevour(env, fishId) {
+    var r = dragonCore.devour(env.state, fishId);
+    if (!r.ok) {
+        if (r.reason === 'no_prey') env.session.showToast('缸里和仓库都没有同族金鲤');
+        else if (r.reason === 'max') env.session.showToast('已经是真龙了');
+        else env.session.showToast('这条鱼还不能进化');
+        return;
+    }
+    if (r.becameDragon) env.session.showToast('吞噬 ' + r.preyName + ' · 化龙！');
+    else env.session.showToast('吞噬 ' + r.preyName + ' · 进化到 ' + r.stage);
+}
+
 /**
- * 选中鱼。返回 true 表示这次点击已经被消费掉。
- * 点空白处返回 false，让后面的撒食逻辑继续跑。
- * 成交在底部那格「卖掉」按钮里（见下面的按钮区）。
+ * 点鱼：选中并弹出信息卡。
+ * 返回 true 表示这次点击已经被消费掉，点空白处返回 false 让撒食继续。
+ *
+ * 优先级：
+ *   信息卡按钮（屏幕坐标） > 信息卡空白 > 鱼（缸内坐标） > 水面
+ * 卡在屏幕坐标、鱼在缸内坐标，所以卡片判定不做 toWorld。
  */
-function handleSell(x, y, env) {
+function handleFish(x, y, env) {
     var state = env.state;
 
-    /* 底部那排按钮不是水面，先整体放行。
-     * 少了这一段会出一个很隐蔽的 bug：点「卖掉」时既没点中鱼，
-     * 下面的「点空白 = 取消选中」就把选中状态清掉了，
-     * 于是按钮永远拿不到那条鱼，只会提示「先点一条鱼」。
+    /* 底部那五枚悬浮按钮不是水面，先整体放行。
+     * 少了这一段会出一个很隐蔽的 bug：点按钮时既没点中鱼，
+     * 下面的「点空白 = 取消选中」就把选中状态清掉了。
      * 命中区永远从 ui/layout.js 取，别在这里手抄坐标。 */
-    if (U.inRect(x, y, L.FEED_BTN) || U.inRect(x, y, L.SELL_BTN) || U.inRect(x, y, L.SHOP_BTN)) {
+    if (L.inDock(x, y)) {
         return false;
     }
 
     var sel = sellRender.selectedOf(state);
+
+    /* 信息卡：先按钮，再整块卡。
+     * 点在卡上（哪怕是没字的地方）都不该撒食、也不该清选中 ——
+     * 否则「去点捞出」的路上先点空了一次，卡就没了。 */
+    var info = sellRender.cardHitOf(state);
+    if (info) {
+        for (var i = 0; i < info.buttons.length; i++) {
+            var btn = info.buttons[i];
+            if (!btn.enabled) continue;
+            if (!U.inRect(x, y, btn.rect)) continue;
+            if (btn.key === 'dump') doDump(env, info.fishId);
+            else if (btn.key === 'devour') doDevour(env, info.fishId);
+            return true;
+        }
+        if (U.inRect(x, y, info.rect)) return true;
+    }
 
     /* 命中要先把屏幕坐标换回鱼缸坐标：放大后鱼在屏幕上挪了位置，
      * 但它的 x/y 仍然是原始缸内坐标。 */
     var w = view.toWorld(x, y);
     var hit = pickFish(state, w.x, w.y);
     if (hit) {
-        /* 再点同一条 = 取消选中 */
+        /* 再点同一条 = 取消选中（连卡一起收起来） */
         state.view.selFish = state.view.selFish === hit.id ? '' : hit.id;
         return true;
     }
@@ -110,7 +231,9 @@ function handleSheet(x, y, env) {
         if (U.inRect(x, y, L.tabRect(t, ease))) {
             session.sheetTab = t;
             session.codexDetail = null;
-            session.bagSel = '';
+            /* 换页 / 换子页都清空选择：鱼的 id 和道具 key 不能混着用 */
+            session.bagSels = [];
+            session.bagMode = false;
             return;
         }
     }
@@ -127,7 +250,10 @@ function handleSheet(x, y, env) {
             var cr = pondCore.cast(state);
             if (!cr.ok) {
                 if (cr.reason === 'no_bait') session.showToast('鱼饵不足，去商店买');
-                else session.showToast('这个鱼塘暂时没鱼可钓');
+                else if (cr.reason === 'bag_full') {
+                    session.showToast('鱼篓满了（' + pondCore.bagCapOf(state) +
+                        ' 条）· 去仓库放缸或卖几条');
+                } else session.showToast('这个鱼塘暂时没鱼可钓');
                 return;
             }
             if (cr.type === 'oyster') {
@@ -140,57 +266,22 @@ function handleSheet(x, y, env) {
         return;
     }
 
-    /* 仓库页：道具行 → 操作栏 → 鱼格 */
+    /* 仓库页：子页签 → 内容。繁育入口钉在子页签行右边，三页都能点 */
     if (session.sheetTab === 4) {
-        var bagSt = pondCore.statusOf(state);
-
-        if (U.inRect(x, y, L.bagItemRect(0, ease))) {
-            var br = pondCore.breakOyster(state);
-            if (!br.ok) session.showToast('没有珍珠贝');
-            else session.showToast(br.pearl ? '开出珍珠！' : '空壳，什么也没有');
-            return;
-        }
-        if (U.inRect(x, y, L.bagItemRect(1, ease))) {
-            var pr = pondCore.sellPearl(state);
-            if (!pr.ok) session.showToast('没有珍珠');
-            else session.showToast('珍珠卖出 +' + wallet.format(pr.price));
-            return;
-        }
-        if (U.inRect(x, y, L.bagItemRect(2, ease))) {
-            session.showToast('鱼饵 ×' + bagSt.bait + ' · 去商店补充');
+        for (var bt = 0; bt < 3; bt++) {
+            if (!U.inRect(x, y, L.bagTabRect(bt, ease))) continue;
+            session.bagTab = bt;
+            session.bagSels = [];
+            session.bagMode = false;
             return;
         }
 
-        if (session.bagSel) {
-            if (U.inRect(x, y, L.bagActionRect(0, ease))) {
-                var mv = pondCore.moveToTank(state, session.bagSel);
-                if (!mv.ok) {
-                    session.showToast(mv.reason === 'full' ? '鱼缸满了，先清出鱼位' : '这条鱼已经不在了');
-                } else {
-                    session.bagSel = '';
-                    session.showToast('已放进鱼缸');
-                }
-                return;
-            }
-            if (U.inRect(x, y, L.bagActionRect(1, ease))) {
-                var sc = pondCore.sellCaught(state, session.bagSel);
-                if (!sc.ok) session.showToast('这条鱼已经不在了');
-                else {
-                    session.bagSel = '';
-                    session.showToast('卖掉 +' + wallet.format(sc.price));
-                }
-                return;
-            }
+        if (U.inRect(x, y, L.bagBreedRect(ease))) {
+            openBreed(env);
+            return;
         }
 
-        var cells = pondCore.caughtList(state);
-        var maxShow = L.BAG_COLS * L.BAG_ROWS;
-        for (var ci = 0; ci < cells.length && ci < maxShow; ci++) {
-            if (U.inRect(x, y, L.bagFishRect(ci, ease))) {
-                session.bagSel = session.bagSel === cells[ci].fish.id ? '' : cells[ci].fish.id;
-                return;
-            }
-        }
+        handleBag(x, y, env);
         return;
     }
 
@@ -244,6 +335,328 @@ function handleSheet(x, y, env) {
     }
 }
 
+/* ---------------- 仓库（M15：网格 + 详情卡） ----------------
+ * 交互只有三步：
+ *   1. 点格子选中（单选模式点第二条会换过去；批量模式是加选）
+ *   2. 详情卡上出现该物品的操作按钮
+ *   3. 点按钮执行
+ * 命中区、格子顺序、按钮文案全部从 render/sheet.js 那把「唯一真相」取，
+ * 不在这一层重抄一遍坐标或文案。
+ */
+
+/* 执行详情卡上的按钮 */
+function runBagAction(env, key) {
+    var session = env.session;
+    var state = env.state;
+
+    if (key === 'breed') {
+        openBreed(env);
+        return;
+    }
+
+    if (key === 'break') {
+        var br = pondCore.breakOyster(state);
+        if (!br.ok) session.showToast('没有珍珠贝');
+        else session.showToast(br.pearl ? '开出珍珠！' : '空壳，什么也没有');
+        return;
+    }
+
+    if (key === 'sellPearl') {
+        var pr = pondCore.sellPearl(state);
+        if (!pr.ok) session.showToast('没有珍珠');
+        else session.showToast('珍珠卖出 +' + wallet.format(pr.price));
+        return;
+    }
+
+    if (key === 'shop') {
+        session.sheetTab = 0;
+        session.bagSels = [];
+        return;
+    }
+
+    if (key === 'tank') {
+        var id = session.bagSels[0];
+        var mv = pondCore.moveToTank(state, id);
+        if (!mv.ok) session.showToast('鱼缸满了，先清出鱼位');
+        else {
+            session.bagSels = [];
+            session.showToast('放进鱼缸 · 点鱼可查看');
+        }
+        return;
+    }
+
+    if (key === 'sell') {
+        var sid = session.bagSels[0];
+        var sc = pondCore.sellCaught(state, sid);
+        session.bagSels = [];
+        if (!sc.ok) session.showToast('这条鱼已经不在了');
+        else session.showToast('卖掉 +' + wallet.format(sc.price));
+        return;
+    }
+
+    if (key === 'tankMany') {
+        var mm = pondCore.moveManyToTank(state, session.bagSels);
+        if (!mm.ok) {
+            session.showToast('鱼缸满了，先清出鱼位');
+        } else if (mm.full > 0) {
+            session.bagSels = [];
+            session.showToast('放入 ' + mm.moved + ' 条 · 鱼缸满，剩 ' + mm.full + ' 条在仓库');
+        } else {
+            session.bagSels = [];
+            session.showToast('放入鱼缸 ' + mm.moved + ' 条');
+        }
+        return;
+    }
+
+    if (key === 'sellMany') {
+        var ms = pondCore.sellManyCaught(state, session.bagSels);
+        session.bagSels = [];
+        if (!ms.ok) session.showToast('这些鱼已经不在了');
+        else session.showToast('卖掉 ' + ms.count + ' 条 +' + wallet.format(ms.total));
+    }
+}
+
+/* 仓库整页的点击分发 */
+function handleBag(x, y, env) {
+    var session = env.session;
+    var state = env.state;
+    var ease = session.sheetEase;
+    if (!session.bagSels) session.bagSels = [];
+
+    /* 繁育入口：盖在这页之上的独立浮层 */
+    if (U.inRect(x, y, L.bagBreedRect(ease))) {
+        openBreed(env);
+        return;
+    }
+
+    /* 批量开关：退出批量时把多选一起清掉，免得下次进来还挂着 */
+    if (U.inRect(x, y, L.bagChipRect(0, ease))) {
+        session.bagMode = !session.bagMode;
+        if (!session.bagMode) session.bagSels = [];
+        return;
+    }
+
+    /* 全选 / 清空 */
+    if (U.inRect(x, y, L.bagChipRect(1, ease))) {
+        var keys = sheetRender.bagKeysOf(state, session);
+        if (!keys.length) return;
+        if (session.bagSels.length >= keys.length) {
+            session.bagSels = [];
+        } else {
+            session.bagSels = keys;
+            session.bagMode = true;
+        }
+        return;
+    }
+
+    /* 详情卡按钮 */
+    var actions = sheetRender.bagActionsOf(state, session);
+    for (var a = 0; a < actions.length; a++) {
+        if (!U.inRect(x, y, L.bagDetailBtnRect(a, actions.length, ease))) continue;
+        if (actions[a].on) runBagAction(env, actions[a].key);
+        else if (actions[a].key === 'tank' || actions[a].key === 'tankMany') {
+            session.showToast('鱼缸满了，先升仓库等级');
+        }
+        return;
+    }
+
+    /* 点在卡片上（不是按钮）：吞掉。
+     * 少了这一行，手指落在卡片空白处会穿透成「点空白」，把选中清掉。 */
+    if (U.inRect(x, y, L.bagDetailRect(ease))) return;
+
+    /* 格子：顺序与渲染完全一致 */
+    var cells = sheetRender.bagCellsOf(state, session);
+    var maxShow = Math.min(L.BAG_GRID_CAP, cells.length);
+    for (var i = 0; i < maxShow; i++) {
+        if (!U.inRect(x, y, L.bagCellRect(i, ease))) continue;
+        var c = cells[i];
+        if (c.kind === 'empty') return;
+
+        var at = session.bagSels.indexOf(c.key);
+        if (session.bagMode) {
+            if (at >= 0) session.bagSels.splice(at, 1);
+            else session.bagSels.push(c.key);
+        } else {
+            session.bagSels = at >= 0 ? [] : [c.key];
+        }
+        return;
+    }
+}
+
+/* 系统弹层：清档 / 关闭 / 点外面关。
+ * 清档要连点两次（第一次只是「上膛」，3 秒内有效），避免误触。 */
+function handleSys(x, y, env) {
+    var session = env.session;
+
+    if (U.inRect(x, y, L.sysBtnRect(1)) || !U.inRect(x, y, L.sysCardRect())) {
+        session.sysOpen = false;
+        session.sysArmed = 0;
+        return;
+    }
+
+    if (U.inRect(x, y, L.sysBtnRect(0))) {
+        if (session.sysArmed > 0) {
+            session.sysOpen = false;
+            session.sysArmed = 0;
+            env.clearSave();
+            return;
+        }
+        session.sysArmed = 3;
+        session.showToast('再点一次「确认清档」');
+    }
+}
+
+/* ---------------- 繁育浮层（M12） ---------------- */
+
+/** 打开繁育：顺手把「上次选的那条」校验一遍，没选就自动挑第一条合性别的成鱼 */
+function openBreed(env) {
+    var session = env.session;
+    var state = env.state;
+
+    session.breedOpen = true;
+    session.breedPick = '';
+    session.nurseryDetail = '';
+
+    var cands = breedCore.candidatesOf(state);
+    var i;
+
+    var m = session.breedMother ? breedCore.findFish(state, session.breedMother) : null;
+    if (!m || m.sex !== 'f') session.breedMother = '';
+    var f = session.breedFather ? breedCore.findFish(state, session.breedFather) : null;
+    if (!f || f.sex !== 'm') session.breedFather = '';
+
+    for (i = 0; i < cands.length; i++) {
+        if (!session.breedMother && cands[i].fish.sex === 'f') session.breedMother = cands[i].fish.id;
+        if (!session.breedFather && cands[i].fish.sex === 'm') session.breedFather = cands[i].fish.id;
+    }
+}
+
+function handleBreed(x, y, env) {
+    var session = env.session;
+    var state = env.state;
+
+    /* 最上层：子代详情（卡片高度跟着词条数走，命中区必须同源） */
+    if (session.nurseryDetail) {
+        var dFish = breedCore.findFish(state, session.nurseryDetail);
+        if (!dFish) {
+            for (var di = 0; di < (state.nursery || []).length; di++) {
+                if (state.nursery[di].id === session.nurseryDetail) dFish = state.nursery[di];
+            }
+        }
+        var dc = L.detailCardRect(dFish ? (dFish.traits || []).length : 1);
+        var xr = { x: dc.x + dc.w - 38, y: dc.y + 10, w: 28, h: 28 };
+
+        if (U.inRect(x, y, xr)) {
+            session.nurseryDetail = '';
+            return;
+        }
+        if (U.inRect(x, y, L.pickBtnRect(0, dc))) {
+            var mv = breedCore.moveToTank(state, session.nurseryDetail);
+            if (!mv.ok) session.showToast(mv.reason === 'full' ? '鱼缸满了，先清出鱼位' : '这条子代已经不在了');
+            else {
+                session.nurseryDetail = '';
+                session.showToast('已放进鱼缸');
+                if (env.saveNow) env.saveNow();
+            }
+            return;
+        }
+        if (U.inRect(x, y, L.pickBtnRect(1, dc))) {
+            var sc = breedCore.sellNursery(state, session.nurseryDetail);
+            if (!sc.ok) session.showToast('这条子代已经不在了');
+            else {
+                session.nurseryDetail = '';
+                session.showToast('卖掉 ' + sc.name + ' +' + wallet.format(sc.price));
+                if (env.saveNow) env.saveNow();
+            }
+            return;
+        }
+        if (!U.inRect(x, y, dc)) session.nurseryDetail = '';
+        return;
+    }
+
+    /* 次上层：选亲本列表 */
+    if (session.breedPick) {
+        var want = session.breedPick === 'mother' ? 'f' : 'm';
+        var otherId = session.breedPick === 'mother' ? session.breedFather : session.breedMother;
+        var all = breedCore.candidatesOf(state);
+        var pool = [];
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].fish.sex !== want || all[i].fish.id === otherId) continue;
+            pool.push(all[i]);
+        }
+        var pc = L.pickCardRect(Math.max(1, Math.min(6, pool.length)));
+        var n = Math.min(6, pool.length);
+        for (var k = 0; k < n; k++) {
+            if (!U.inRect(x, y, L.pickRowRect(k))) continue;
+            if (session.breedPick === 'mother') session.breedMother = pool[k].fish.id;
+            else session.breedFather = pool[k].fish.id;
+            session.breedPick = '';
+            return;
+        }
+        /* 取消按钮是「两个按钮宽」那一整条 */
+        var cb = L.pickBtnRect(0, pc);
+        if (U.inRect(x, y, { x: cb.x, y: cb.y, w: cb.w * 2 + 10, h: cb.h })) {
+            session.breedPick = '';
+            return;
+        }
+        if (!U.inRect(x, y, pc)) session.breedPick = '';
+        return;
+    }
+
+    /* 关闭 */
+    if (U.inRect(x, y, L.breedCloseRect())) {
+        session.breedOpen = false;
+        return;
+    }
+
+    /* 亲本槽 */
+    if (U.inRect(x, y, L.breedParentRect(0))) {
+        session.breedPick = 'mother';
+        return;
+    }
+    if (U.inRect(x, y, L.breedParentRect(1))) {
+        session.breedPick = 'father';
+        return;
+    }
+
+    /* 开始繁育 */
+    if (U.inRect(x, y, L.breedGoRect())) {
+        var r = breedCore.breed(state, session.breedMother, session.breedFather);
+        if (!r.ok) {
+            session.showToast(r.text || '还不能繁育');
+        } else {
+            session.showToast('产卵成功 · ' + r.seconds + ' 秒后孵化' + (r.twin ? ' · 双生！' : ''));
+            if (env.saveNow) env.saveNow();
+        }
+        return;
+    }
+
+    /* 孵化槽：只做提示，真正的落缸在 sim 每帧的 tick 里 */
+    var total = cfg.breed.slots || 3;
+    for (var h = 0; h < total; h++) {
+        if (!U.inRect(x, y, L.hatchSlotRect(h))) continue;
+        var eggs = breedCore.hatchList(state);
+        var e = eggs[h];
+        if (!e) session.showToast('空槽 · 选好亲本就能产卵');
+        else if (e.ready) session.showToast(breedCore.nurseryRoom(state) > 0 ? '正在落缸' : '培育缸满了，先腾位置');
+        else session.showToast('还要 ' + e.left + ' 秒');
+        return;
+    }
+
+    /* 培育缸格子 → 子代详情 */
+    var slots = breedCore.nurserySlotsOf(state);
+    var list = state.nursery || [];
+    for (var c2 = 0; c2 < slots; c2++) {
+        if (!U.inRect(x, y, L.nurseryCellRect(c2))) continue;
+        if (list[c2]) session.nurseryDetail = list[c2].id;
+        else session.showToast('培育缸空着 · 孵出的子代会落在这里');
+        return;
+    }
+
+    /* 点卡片外面 = 关掉 */
+    if (!U.inRect(x, y, L.breedCardRect())) session.breedOpen = false;
+}
+
 function tap(x, y, env) {
     var session = env.session;
     var state = env.state;
@@ -257,23 +670,26 @@ function tap(x, y, env) {
         return;
     }
 
+    /* 1.5 系统弹层：同样阻塞一切 */
+    if (session.sysOpen) {
+        handleSys(x, y, env);
+        return;
+    }
+
+    /* 1.6 繁育浮层：盖在面板之上，进来之后先吃点击 */
+    if (session.breedOpen) {
+        handleBreed(x, y, env);
+        return;
+    }
+
     /* 2. 调试面板 */
     if (debugPanel.tap(x, y, session, env)) return;
 
     /* 3. 连点金币胶囊开调试面板 */
     debugPanel.registerTap(x, y, session, L);
 
-    /* 4. 缸内缩放按钮：点在玻璃上，但不属于水面，先拦下来 */
-    if (U.inRect(x, y, L.ZOOM_IN)) {
-        var zin = view.step(1);
-        session.showToast(zin === 2 ? '鱼缸已放大 2×' : '鱼缸已放大 ' + view.label());
-        return;
-    }
-    if (U.inRect(x, y, L.ZOOM_OUT)) {
-        var zout = view.step(-1);
-        session.showToast(zout === 1 ? '鱼缸已还原' : '鱼缸已缩到 ' + view.label());
-        return;
-    }
+    /* 4. 缸内不再有缩放按钮：缩放靠双指、平移靠滑动，这里直接放行。
+     *    （M10 删掉了原来的 +/− 命中区，玻璃整块还给鱼） */
 
     /* 5. 鱼缸切换：标签在顶部，商店面板挡不到，所以放在商店之前 */
     var tankN = storage.tankCountOf(state);
@@ -300,29 +716,29 @@ function tap(x, y, env) {
         return;
     }
 
-    /* 6. 选中鱼 / 卖鱼：点鱼高亮，点「卖掉」才成交 */
-    if (handleSell(x, y, env)) return;
+    /* 6. 点鱼：选中并弹出信息卡（捞出 / 吞噬都在卡上） */
+    if (handleFish(x, y, env)) return;
 
-    /* 7. 底部按钮：撒食 / 卖掉 / 商店 */
-    if (U.inRect(x, y, L.FEED_BTN)) {
-        env.sim.feedCenter(state, C.viewport);
-        return;
-    }
-    if (U.inRect(x, y, L.SELL_BTN)) {
-        var sel = sellRender.selectedOf(state);
-        if (!sel) {
-            session.showToast('先点一条鱼，再点卖掉');
-            return;
-        }
-        var r = env.sim.sellFish(state, sel.id);
-        state.view.selFish = '';
-        if (r && r.ok) session.showToast('卖掉 ' + r.name + ' +' + wallet.format(r.price));
-        return;
-    }
-    if (U.inRect(x, y, L.SHOP_BTN)) {
+    /* 7. 底栏五入口：商店 / 仓库 / 鱼塘 / 图鉴 / 系统。
+     *    前四个直接打开面板并对准页签，省掉「先开面板再点页签」的一步；
+     *    「系统」开自己的弹层，不再借商店面板当系统入口。 */
+    var bar = [
+        { r: L.STORE_BTN, tab: 0 },
+        { r: L.BAG_BTN, tab: 4 },
+        { r: L.POND_BTN, tab: 3 },
+        { r: L.CODEX_BTN, tab: 2 }
+    ];
+    for (var bi = 0; bi < bar.length; bi++) {
+        if (!U.inRect(x, y, bar[bi].r)) continue;
         session.sheetOpen = true;
+        session.sheetTab = bar[bi].tab;
         session.codexDetail = null;
-        session.bagSel = '';
+        session.bagSels = [];
+        return;
+    }
+    if (U.inRect(x, y, L.SYS_BTN)) {
+        session.sysOpen = true;
+        session.sysArmed = 0;
         return;
     }
 
@@ -350,6 +766,8 @@ function attach(env) {
     var pinch = null;
     var lastTap = null;
 
+    function nowMs() { return platform.now(); }
+
     platform.onTouchStart(function (e) {
         var ts = e.touches && e.touches.length ? e.touches : [];
 
@@ -358,6 +776,7 @@ function attach(env) {
             var diag = require('./diag.js');
             diag.state.forceShow = !diag.state.forceShow;
             pending = drag = pinch = null;
+            hold = null;
             return;
         }
 
@@ -366,12 +785,19 @@ function attach(env) {
             pinch = { d: dist(ts[0], ts[1]), x: m.x, y: m.y };
             pending = null;
             drag = null;
+            hold = null;
+            view.stop();
             return;
         }
 
         if (ts.length === 1) {
-            pending = { x: ts[0].clientX, y: ts[0].clientY };
-            drag = { x: ts[0].clientX, y: ts[0].clientY };
+            var x = ts[0].clientX;
+            var y = ts[0].clientY;
+            pending = { x: x, y: y };
+            drag = { x: x, y: y, t: nowMs(), lastMoveAt: 0, vx: 0, vy: 0 };
+
+            /* 按住鱼饵购买键 = 准备连买，计时由 step() 推进 */
+            press(x, y, env);
         }
     });
 
@@ -390,17 +816,33 @@ function attach(env) {
             return;
         }
 
-        if (!pending || !drag || !ts.length) return;
+        if (!drag || !ts.length) return;
         var p = ts[0];
+
+        /* 长按中手指滑出按钮太远：取消这次长按，交给普通拖动 */
+        if (hold) {
+            hold.x = p.clientX;
+            hold.y = p.clientY;
+            if (Math.abs(p.clientX - hold.ox) > 14 || Math.abs(p.clientY - hold.oy) > 14) hold = null;
+        }
+
         var moved = dist(p, { clientX: drag.x, clientY: drag.y });
         if (moved < 8) return;
 
-        /* 放大后拖动缸内画面；按钮区不参与平移。
+        /* 单指在玻璃里滑动 = 平移（放大后才有实际位移，clamp 会兜住）。
          * 一旦判定为拖动，这次抬手就不再当成点击（不会误撒食/误卖鱼）。 */
-        var canPan = view.state.zoom > 1 && view.inGlass(drag.x, drag.y) &&
-            !U.inRect(drag.x, drag.y, L.ZOOM_IN) &&
-            !U.inRect(drag.x, drag.y, L.ZOOM_OUT);
-        if (canPan) view.pan(p.clientX - drag.x, p.clientY - drag.y);
+        var dx = p.clientX - drag.x;
+        var dy = p.clientY - drag.y;
+        var canPan = view.inGlass(drag.x, drag.y);
+        if (canPan) view.pan(dx, dy);
+
+        /* 记录速度给抬手后的惯性用，做一次平滑免得单帧抖动把画面甩飞 */
+        var t = nowMs();
+        var dms = Math.max(1, t - drag.t);
+        drag.vx = drag.vx * 0.3 + (dx / dms * 1000) * 0.7;
+        drag.vy = drag.vy * 0.3 + (dy / dms * 1000) * 0.7;
+        drag.t = t;
+        drag.lastMoveAt = t;
         drag.x = p.clientX;
         drag.y = p.clientY;
         pending = null;
@@ -413,17 +855,33 @@ function attach(env) {
             drag = null;
             return;
         }
-        if (!pending) { drag = null; return; }
+
+        /* 长按连买已经出过手：这次抬手不再当成一次点击，避免多买一个 */
+        if (release()) {
+            pending = null;
+            drag = null;
+            return;
+        }
+
+        if (!pending) {
+            /* 这是一次拖动：把最后的余速交给惯性，让画面再滑一小段 */
+            if (drag && drag.lastMoveAt && nowMs() - drag.lastMoveAt < 140) {
+                var cap = 2400;
+                var vx = Math.max(-cap, Math.min(cap, drag.vx));
+                var vy = Math.max(-cap, Math.min(cap, drag.vy));
+                if (Math.abs(vx) > 120 || Math.abs(vy) > 120) view.fling(vx, vy);
+            }
+            drag = null;
+            return;
+        }
 
         var p = pending;
         pending = null;
         drag = null;
 
-        /* 放大状态下双击鱼缸还原；未放大时仍走正常点击，不影响连续撒食。
-         * 连点 +/− 按钮不算双击，否则想从 1× 点到 2× 会被还原回去。 */
-        var onZoomBtn = U.inRect(p.x, p.y, L.ZOOM_IN) || U.inRect(p.x, p.y, L.ZOOM_OUT);
+        /* 放大状态下双击鱼缸还原；未放大时仍走正常点击，不影响连续撒食。 */
         var nowT = Date.now();
-        if (!onZoomBtn && view.state.zoom > 1 && lastTap && nowT - lastTap.t < 350 &&
+        if (view.state.zoom > 1.001 && lastTap && nowT - lastTap.t < 350 &&
             Math.abs(p.x - lastTap.x) < 28 && Math.abs(p.y - lastTap.y) < 28) {
             lastTap = null;
             view.reset();
@@ -437,5 +895,8 @@ function attach(env) {
 
 module.exports = {
     attach: attach,
-    tap: tap
+    tap: tap,
+    step: step,
+    press: press,
+    release: release
 };

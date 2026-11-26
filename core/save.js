@@ -24,6 +24,22 @@ var LEGACY_V1_KEYS = ['aquarium_game_v1'];
 
 /* ---------------- 序列化 ---------------- */
 
+/* 仓库 / 培育缸里的鱼结构一致：都不存坐标，都由 ensurePlacement 兜底 */
+function packFish(f) {
+    return {
+        id: f.id,
+        sp: f.speciesId,
+        g: f.growth,
+        h: f.hunger,
+        m: f.mood,
+        tr: f.traits || [],
+        sx: f.sex,
+        /* 进化阶（M14）：只有金鲤鱼会 >0，别的鱼写 0 也不占地 */
+        ev: f.evo || 0,
+        b: f.bornAt || 0
+    };
+}
+
 function serialize(state) {
     return {
         v: cfg.saveVersion,
@@ -53,17 +69,26 @@ function serialize(state) {
             pearl: (state.bag && state.bag.pearl) || 0
         },
         /* 仓库里的鱼还没进缸，不存坐标，放进去时由 ensurePlacement 兜底 */
-        caught: (state.caught || []).map(function (f) {
+        caught: (state.caught || []).map(packFish),
+
+        /* M12 繁育：孵化槽只存「结果 + 时间」，不存任何运行时字段 */
+        hatchery: (state.hatchery || []).map(function (h) {
             return {
-                id: f.id,
-                sp: f.speciesId,
-                g: f.growth,
-                h: f.hunger,
-                m: f.mood,
-                tr: f.traits || [],
-                b: f.bornAt || 0
+                id: h.id,
+                sp: h.speciesId,
+                sx: h.sex,
+                tr: h.traits || [],
+                mid: h.motherId || '',
+                fid: h.fatherId || '',
+                st: h.startAt || 0,
+                ht: h.hatchAt || 0,
+                sec: h.seconds || 0,
+                tw: h.twin ? 1 : 0
             };
         }),
+        nursery: (state.nursery || []).map(packFish),
+        nurseryLv: state.nurseryLv || 1,
+        breedSeq: state.breedSeq || 0,
 
         fish: state.fish.map(function (f) {
             return {
@@ -73,6 +98,8 @@ function serialize(state) {
                 h: f.hunger,
                 m: f.mood,
                 tr: f.traits || [],
+                sx: f.sex,
+                ev: f.evo || 0,
                 b: f.bornAt || 0,
                 /* 坐标也存下来，重开游戏时鱼不会全挤到中间重新随机 */
                 x: Math.round(f.x || 0),
@@ -127,6 +154,8 @@ function deserializeV2(raw) {
             hunger: it.h,
             mood: it.m,
             traits: it.tr,
+            sex: it.sx,
+            evo: it.ev || 0,
             bornAt: it.b,
             /* 老档没有坐标时传 0，让 ensurePlacement 兜底重排 */
             x: it.x || 0,
@@ -157,9 +186,47 @@ function deserializeV2(raw) {
             hunger: cf.h,
             mood: cf.m,
             traits: cf.tr,
+            sex: cf.sx,
+            evo: cf.ev || 0,
             bornAt: cf.b
         }));
     }
+
+    /* M12 繁育：老档没有这些字段，读成空数组/默认值就等于迁移。
+     * 老档里的鱼没有 sx，create 会按 50/50 随机补 —— 不会让老玩家全变公鱼。 */
+    var hatchList = raw.hatchery || [];
+    for (var hi = 0; hi < hatchList.length; hi++) {
+        var h = hatchList[hi];
+        if (!h || !h.id) continue;
+        s.hatchery.push({
+            id: h.id,
+            speciesId: h.sp,
+            sex: h.sx === 'm' || h.sx === 'f' ? h.sx : 'f',
+            traits: fishFactory.normalizeTraits(h.tr),
+            motherId: h.mid || '',
+            fatherId: h.fid || '',
+            startAt: Number(h.st) || 0,
+            hatchAt: Number(h.ht) || 0,
+            seconds: Number(h.sec) || 0,
+            twin: !!h.tw
+        });
+    }
+    var nurseryList = raw.nursery || [];
+    for (var ni = 0; ni < nurseryList.length; ni++) {
+        var nf = nurseryList[ni];
+        s.nursery.push(fishFactory.create(nf.sp, {
+            id: nf.id,
+            growth: nf.g,
+            hunger: nf.h,
+            mood: nf.m,
+            traits: nf.tr,
+            sex: nf.sx,
+            bornAt: nf.b
+        }));
+    }
+    var nurseryMax = Math.max(1, cfg.breed && cfg.breed.openMax || 1);
+    s.nurseryLv = Math.max(1, Math.min(nurseryMax, Math.floor(raw.nurseryLv || 1)));
+    s.breedSeq = Math.max(0, Math.floor(raw.breedSeq || 0));
 
     return s;
 }
@@ -181,11 +248,12 @@ function migrateV1(raw) {
         s.fish.push(fishFactory.create(sp.id, {
             growth: it.g,
             hunger: it.h,
-            mood: it.e
+            mood: it.e,
+            rollTraits: true
         }));
     }
     if (!s.fish.length) {
-        s.fish.push(fishFactory.create(cfg.species[0].id, { growth: 6 }));
+        s.fish.push(fishFactory.create(cfg.species[0].id, { growth: 6, rollTraits: true }));
     }
     codex.syncFromFish(s);
     return s;

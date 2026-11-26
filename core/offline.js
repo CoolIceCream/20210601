@@ -19,6 +19,7 @@ var cfg = require('../config/index.js');
 var fishLib = require('./fish.js');
 var storage = require('./storage.js');
 var predation = require('./predation.js');
+var breed = require('./breed.js');
 
 /**
  * 结算离线成长并写回 state。
@@ -92,8 +93,19 @@ function settle(state, nowMs) {
         after += fishLib.sellPriceOf(f, state.shellLv);
     }
 
-    /* 没有鱼长大、也没有鱼被吃掉，就不打扰玩家 */
-    if (grown <= 0 && eaten <= 0) return null;
+    /* 繁育：离线期间到点的蛋必须孵出来，不能等玩家回来才继续倒数。
+     * 培育缸里的子代也按同样的离线效率长大。 */
+    var hatched = breed.tick(state, nowMs).length;
+    var nursery = state.nursery || [];
+    for (i = 0; i < nursery.length; i++) {
+        var nf = nursery[i];
+        if (nf.growth >= 100) continue;
+        var nsp = fishLib.speciesById(nf.speciesId);
+        nf.growth = Math.min(100, nf.growth + (100 / Math.max(1, nsp.matureSeconds || 120)) * effective);
+    }
+
+    /* 没有鱼长大、没有鱼被吃掉、也没有蛋孵出来，就不打扰玩家 */
+    if (grown <= 0 && eaten <= 0 && hatched <= 0) return null;
 
     var result = {
         seconds: seconds,
@@ -103,6 +115,7 @@ function settle(state, nowMs) {
         grown: grown,
         adult: adult,
         eaten: eaten,
+        hatched: hatched,
         total: state.fish.length,
         before: before,
         after: after,

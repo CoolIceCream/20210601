@@ -30,8 +30,16 @@ function line(ctx, w) {
     ctx.stroke();
 }
 
+/* 深色模式：底部悬浮按钮是奶油底，白图标在上面会糊成一块。
+ * 给 draw() 传一个 tint 色，white() 就换成这个颜色画，
+ * 图标仍然是「同一条路径 + 同一个描边」，只是换了填充。 */
+var tint = null;
+
 function white(ctx, a) {
-    ctx.fillStyle = 'rgba(255,255,255,' + (a === undefined ? 1 : a) + ')';
+    var alpha = (a === undefined ? 1 : a);
+    ctx.fillStyle = tint
+        ? U.hexA(tint, alpha)
+        : 'rgba(255,255,255,' + alpha + ')';
     ctx.fill();
 }
 
@@ -123,20 +131,24 @@ function auto(ctx, bg) {
 }
 
 /* 仓库扩容：木箱（外框 + 内框 + 交叉板条） */
+/* 仓库：带盖储物箱（箱盖 + 箱体 + 锁扣）
+ * 原来是「方框 + 对角封条」，26px 下被读成信封 —— 底栏导航里特别容易误会。
+ * 换成上下两段的箱子，横向那道盖缝是唯一必需的识别特征。 */
 function warehouse(ctx) {
-    U.roundRect(ctx, -0.46, -0.42, 0.92, 0.85, 0.10);
+    /* 箱体：比箱盖窄一点，箱盖才会像「盖上去」 */
+    U.roundRect(ctx, -0.42, -0.10, 0.84, 0.52, 0.07);
     white(ctx, 1);
-    line(ctx, 0.08);
+    line(ctx, 0.075);
 
-    U.roundRect(ctx, -0.32, -0.28, 0.64, 0.57, 0.05);
-    line(ctx, 0.062);
+    /* 箱盖 */
+    U.roundRect(ctx, -0.46, -0.40, 0.92, 0.30, 0.07);
+    white(ctx, 1);
+    line(ctx, 0.075);
 
-    ctx.beginPath();
-    ctx.moveTo(-0.32, -0.28);
-    ctx.lineTo(0.32, 0.29);
-    ctx.moveTo(0.32, -0.28);
-    ctx.lineTo(-0.32, 0.29);
-    line(ctx, 0.062);
+    /* 锁扣：跨在盖缝上，深色小块 */
+    U.roundRect(ctx, -0.09, -0.17, 0.18, 0.22, 0.04);
+    ctx.fillStyle = INK_SOFT;
+    ctx.fill();
 }
 
 /* 新鱼缸：圆口玻璃缸（水 + 一条小鱼 + 缸口 + 底座）
@@ -394,36 +406,64 @@ function coin(ctx) {
 }
 
 /* 商店：遮阳棚 + 店面 + 门
- * 棚上两条深色条纹是必需的 —— 没有条纹，梯形会被读成「屋顶」。 */
+ * 原来的两条深色条纹在 30px 下会糊成一块黑，反而看不出是棚子。
+ * 改成波浪下沿：小尺寸里「一排小圆弧」比竖条纹更好认，也不吃对比度。 */
 function shop(ctx) {
-    ctx.beginPath();
-    ctx.moveTo(-0.46, -0.44);
-    ctx.lineTo(0.46, -0.44);
-    ctx.lineTo(0.40, -0.16);
-    ctx.lineTo(-0.40, -0.16);
-    ctx.closePath();
+    /* 店面 */
+    U.roundRect(ctx, -0.36, -0.02, 0.72, 0.42, 0.06);
     white(ctx, 1);
     line(ctx, 0.07);
 
-    /* 条纹裁进棚里，四角不会戳出来 */
-    ctx.save();
+    /* 遮阳棚：上宽下窄的梯形，下沿三个波浪 */
     ctx.beginPath();
-    ctx.moveTo(-0.46, -0.44);
-    ctx.lineTo(0.46, -0.44);
-    ctx.lineTo(0.40, -0.16);
-    ctx.lineTo(-0.40, -0.16);
+    ctx.moveTo(-0.48, -0.40);
+    ctx.lineTo(0.48, -0.40);
+    ctx.lineTo(0.40, -0.10);
+    ctx.quadraticCurveTo(0.30, -0.02, 0.20, -0.10);
+    ctx.quadraticCurveTo(0.10, -0.02, 0, -0.10);
+    ctx.quadraticCurveTo(-0.10, -0.02, -0.20, -0.10);
+    ctx.quadraticCurveTo(-0.30, -0.02, -0.40, -0.10);
     ctx.closePath();
-    ctx.clip();
-    ctx.fillStyle = INK_SOFT;
-    ctx.fillRect(-0.13, -0.46, 0.10, 0.32);
-    ctx.fillRect(0.15, -0.46, 0.10, 0.32);
-    ctx.restore();
-
-    U.roundRect(ctx, -0.36, -0.13, 0.72, 0.55, 0.08);
     white(ctx, 1);
     line(ctx, 0.075);
 
-    U.roundRect(ctx, -0.13, 0.10, 0.26, 0.32, 0.05);
+    /* 门：整个图标唯一的深色块，视线落点 */
+    U.roundRect(ctx, -0.13, 0.10, 0.26, 0.30, 0.04);
+    ctx.fillStyle = INK_SOFT;
+    ctx.fill();
+}
+
+/* 图鉴：合着的书（书脊 + 三条书页线 + 书签带）
+ * 书脊靠左，右侧留出文字线；书签带是唯一一处深色，用来打破白块。 */
+function book(ctx) {
+    U.roundRect(ctx, -0.36, -0.42, 0.72, 0.84, 0.09);
+    white(ctx, 1);
+    line(ctx, 0.075);
+
+    /* 书脊 */
+    ctx.beginPath();
+    ctx.moveTo(-0.22, -0.42);
+    ctx.lineTo(-0.22, 0.42);
+    line(ctx, 0.07);
+
+    /* 书页线 */
+    ctx.beginPath();
+    ctx.moveTo(-0.11, -0.21);
+    ctx.lineTo(0.26, -0.21);
+    ctx.moveTo(-0.11, -0.04);
+    ctx.lineTo(0.26, -0.04);
+    ctx.moveTo(-0.11, 0.13);
+    ctx.lineTo(0.16, 0.13);
+    line(ctx, 0.062);
+
+    /* 书签带：从书底垂出来，深色小块 */
+    ctx.beginPath();
+    ctx.moveTo(0.12, -0.42);
+    ctx.lineTo(0.24, -0.42);
+    ctx.lineTo(0.24, -0.16);
+    ctx.lineTo(0.18, -0.22);
+    ctx.lineTo(0.12, -0.16);
+    ctx.closePath();
     ctx.fillStyle = INK_SOFT;
     ctx.fill();
 }
@@ -434,6 +474,7 @@ var ART = {
     auto: auto,
     warehouse: warehouse,
     tank: tank,
+    book: book,
     shell: shell,
     bait: bait,
     oyster: oyster,
@@ -447,15 +488,19 @@ var ART = {
 
 /**
  * 在 (cx, cy) 画一个边长 size 的图标。
- * bg 是所在色块的底色，只在「需要挖洞」的图标（齿轮轴孔）里用到。
+ * bg  是所在色块的底色，只在「需要挖洞」的图标（齿轮轴孔）里用到。
+ * color 传入时切成深色模式（浅色底上用），不传就是原来的白色图标。
  */
-function draw(ctx, id, cx, cy, size, bg) {
+function draw(ctx, id, cx, cy, size, bg, color) {
     var fn = ART[id] || ART.feed;
+    var prev = tint;
+    tint = color || null;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(size, size);
     fn(ctx, bg);
     ctx.restore();
+    tint = prev;
 }
 
 module.exports = {

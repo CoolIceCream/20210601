@@ -47,6 +47,9 @@ var LOOK = {
     dusk_betta: { a: 0.44, b: 0.44, len: 0.95, spread: 1.24, notch: 0.52, pat: null },
     red_arrow: { a: 0.54, b: 0.31, len: 0.64, spread: 0.76, notch: 0.30, pat: null },
     gold_dragon: { a: 0.56, b: 0.33, len: 0.92, spread: 1.10, notch: 0.50, pat: 'stripe', barbel: true },
+    /* 金鲤鱼 / 蛟 / 真龙共用一套外形：圆胖鲤身 + 龙须 + 金鳞，
+     * 进化阶（evo）只加角、加体型、把颜色往赤金推，不换模型。 */
+    gold_koi: { a: 0.50, b: 0.38, len: 0.72, spread: 1.02, notch: 0.46, pat: 'stripe', barbel: true },
     reef_shark: { a: 0.60, b: 0.31, len: 0.62, spread: 0.86, notch: 0.60, pat: null, shark: true }
 };
 
@@ -228,6 +231,10 @@ function draw(ctx, o) {
     var pair = PALETTE[sp.palette] || PALETTE[0];
     var c1 = pair[0];
     var c2 = pair[1];
+    if (evo > 0) {
+        c1 = mix(c1, '#ffe8a6', evo * 0.10);
+        c2 = mix(c2, '#a04a12', evo * 0.07);
+    }
     var ink = inkOf(c2);
 
     var L = o.L || 44;
@@ -238,6 +245,10 @@ function draw(ctx, o) {
     var belly = U.clamp(o.belly == null ? 0.35 : o.belly, 0, 1);
     var growth = o.growth == null ? 100 : o.growth;
     var hungry = o.hunger != null && o.hunger < 20;
+
+    /* 进化阶（M14）：1 金纹 / 2 蛟 / 3 真龙。只有带 evo 配置的鱼种会读到 >0。
+     * 越往上金越赤，角越长，龙须越显眼。 */
+    var evo = Math.max(0, Math.min(3, Math.floor(o.evo || 0)));
 
     /* 摆尾：幅度小一点，太快像抽筋 */
     var amp = (o.wag == null ? 0.55 : o.wag);
@@ -252,6 +263,16 @@ function draw(ctx, o) {
     ctx.scale(o.dir || 1, 1);
 
     if (o.glow) traitGlow(ctx, a);
+    /* 化龙之后自带一层金雾，不用词条也能一眼认出来 */
+    if (evo >= 3) {
+        var dg = ctx.createRadialGradient(0, 0, a * 0.5, 0, 0, a * 1.9);
+        U.stop(dg, 0, 'rgba(255,222,140,0.26)');
+        U.stop(dg, 1, 'rgba(255,222,140,0)');
+        ctx.fillStyle = dg;
+        ctx.beginPath();
+        ctx.arc(0, 0, a * 1.9, 0, 6.2832);
+        ctx.fill();
+    }
 
     /* 1. 尾鳍 / 胸鳍 / 背鳍：都压在身体下面 */
     if (lk.shark) {
@@ -388,10 +409,47 @@ function draw(ctx, o) {
         }
     }
 
+    /* 8.5 龙角（evo ≥ 2 才有）：从头顶往后上方翘，真龙最长 */
+    if (evo >= 2) {
+        /* 角要「长出身体」才像龙：起点贴在头顶偏后，往后上方挑，
+         * 真龙（evo 3）再长一截并多一根小分叉。 */
+        var hornH = b * (0.95 + (evo - 2) * 0.62);
+        var hornW = Math.max(2.6, a * (evo >= 3 ? 0.155 : 0.125));
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (var hs = -1; hs <= 1; hs += 2) {
+            /* 头朝右，角往后上方掠 —— 竖直的角读成「天线」，后掠才像龙 */
+            /* 前角短、后角长，错落开才不像一对兔耳 */
+            var hh = hornH * (hs > 0 ? 0.74 : 1);
+            var bx = a * 0.20 + hs * a * 0.17;
+            var by0 = -b * 0.93;
+            var tx = bx - a * 0.40;
+            var ty = by0 - hh;
+
+            ctx.beginPath();
+            ctx.moveTo(bx, by0);
+            ctx.quadraticCurveTo(
+                bx + a * 0.05, by0 - hh * 0.58,
+                tx, ty
+            );
+            ctx.strokeStyle = evo >= 3 ? '#f7d97e' : '#e8c26c';
+            ctx.lineWidth = hornW;
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255,250,228,0.78)';
+            ctx.lineWidth = Math.max(1, hornW * 0.34);
+            ctx.stroke();
+
+            /* 试过给真龙加分叉，在小尺寸下会和主枝交叉成「一堆芦苇」，
+             * 所以改用「更粗更长的角 + 金光」来区分阶数，干净得多。 */
+        }
+        ctx.restore();
+    }
+
     /* 9. 龙须 */
     if (lk.barbel) {
-        ctx.strokeStyle = U.hexA(ink, 0.55);
-        ctx.lineWidth = Math.max(1, L * 0.022);
+        ctx.strokeStyle = U.hexA(ink, evo > 0 ? 0.78 : 0.55);
+        ctx.lineWidth = Math.max(1, L * (evo > 0 ? 0.032 : 0.022));
         ctx.beginPath();
         ctx.moveTo(a * 0.94, -b * 0.04);
         ctx.quadraticCurveTo(a * 1.26, b * 0.20, a * 1.16, b * 0.70);
@@ -426,7 +484,10 @@ function drawThumb(ctx, speciesId, x, y, w, h, opt) {
         tilt: 0,
         wag: 0.25,
         belly: 0.7,
-        growth: 100,
+        growth: opt.growth == null ? 100 : opt.growth,
+        /* 仓库 / 繁育 / 图鉴里的缩略图也要能看出进化阶，否则真龙在格子里
+         * 和金鲤鱼长得一模一样 */
+        evo: opt.evo || 0,
         detail: true,
         glow: !!opt.glow
     });

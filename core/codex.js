@@ -85,7 +85,9 @@ function list(state) {
 }
 
 function sourceOf(sp) {
-    if (sp.secret) return '普通鱼卵 0.1% · 传奇鱼卵必出';
+    /* 金鲤鱼是传奇卵的第二档产出，普通卵里完全没有 */
+    if (sp.legendOnly) return '传奇鱼卵 10%';
+    if (sp.secret) return '普通鱼卵 0.1% · 传奇鱼卵 90%';
     if (sp.rarity === 'R') return '普通鱼卵';
     if (sp.rarity === 'SR') return '稀有鱼卵';
     if (sp.rarity === 'SSR') return '传说鱼卵';

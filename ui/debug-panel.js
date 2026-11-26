@@ -159,7 +159,7 @@ function run(id, session, env) {
             return;
         }
         var sp = fishLib.randomSpecies();
-        state.fish.push(fishLib.create(sp.id, { growth: 30, tank: storage.activeTankOf(state) }));
+        state.fish.push(fishLib.create(sp.id, { growth: 30, tank: storage.activeTankOf(state), rollTraits: true }));
         env.sim.ensurePlacement(state, env.viewport);
         session.showToast('加了一条 ' + sp.name);
     } else if (id === 'skip') {

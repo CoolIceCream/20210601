@@ -87,6 +87,8 @@ function setup() {
     session.sheetTab = 0;
     session.modal = null;
     session.toast = null;
+    session.sysOpen = false;
+    session.sysArmed = 0;
     session.debug.open = false;
     session.debug.tapTimes.length = 0;
 
@@ -100,7 +102,9 @@ function setup() {
         session: session,
         viewport: vp,
         sim: sim,
-        saveNow: function () {}
+        saveNow: function () {},
+        cleared: 0,
+        clearSave: function () { env.cleared += 1; }
     };
     return env;
 }
@@ -129,61 +133,130 @@ test('点鱼：选中它，还没成交', function () {
     return 'selFish=' + env.state.view.selFish;
 });
 
-test('点「卖掉」：进账 + 鱼消失 + 清掉选中', function () {
-    var env = setup();
-    var t = fishAt(env);
-    var price = fishLib.sellPriceOf(t.f);
-    var before = env.state.coins.fish;
-
-    touch.tap(t.x, t.y, env);
-    var b = btnCenter(L.SELL_BTN);
-    touch.tap(b.x, b.y, env);
-
-    assert(env.state.coins.fish === before + price,
-        '余额应该 +' + price + '，实际 ' + before + ' → ' + env.state.coins.fish);
-    assert(env.state.fish.length === 0, '鱼应该被卖掉了');
-    assert(env.state.view.selFish === '', '卖完要清掉选中，否则光圈会留在原地');
-    assert(session.toast && session.toast.text.indexOf('卖掉') === 0, '应该有成交提示');
-    return before + ' → ' + env.state.coins.fish + ' · ' + session.toast.text;
-});
-
-test('没选鱼就点「卖掉」：只提示，余额和鱼都不动', function () {
-    var env = setup();
-    var before = env.state.coins.fish;
-
-    var b = btnCenter(L.SELL_BTN);
-    touch.tap(b.x, b.y, env);
-
-    assert(env.state.coins.fish === before, '不该动余额');
-    assert(env.state.fish.length === 1, '不该动鱼');
-    assert(session.toast && session.toast.text.indexOf('先点一条鱼') === 0, '应该提示先点鱼');
-    return session.toast.text;
-});
-
-test('选中后点「撒食」：选中保留，饲料照撒', function () {
+test('底栏「商店」：打开面板并对准商店页', function () {
     var env = setup();
     var t = fishAt(env);
 
     touch.tap(t.x, t.y, env);
-    var b = btnCenter(L.FEED_BTN);
-    touch.tap(b.x, b.y, env);
-
-    assert(env.state.view.selFish === t.f.id, '撒食不该把选中状态弄丢');
-    assert(env.state.foods.length > 0, '应该掉下饲料');
-    return '饲料 ' + env.state.foods.length + ' 颗 · 选中仍在';
-});
-
-test('选中后点「商店」：面板打开，选中保留', function () {
-    var env = setup();
-    var t = fishAt(env);
-
-    touch.tap(t.x, t.y, env);
-    var b = btnCenter(L.SHOP_BTN);
+    var b = btnCenter(L.STORE_BTN);
     touch.tap(b.x, b.y, env);
 
     assert(session.sheetOpen === true, '商店面板应该打开');
-    assert(env.state.view.selFish === t.f.id, '开商店不该把选中状态弄丢');
-    return 'sheetOpen=' + session.sheetOpen;
+    assert(session.sheetTab === 0, '应停在商店页，实际 ' + session.sheetTab);
+    assert(env.state.view.selFish === t.f.id, '开面板不该把选中状态弄丢');
+    return 'sheetOpen=' + session.sheetOpen + ' · tab=' + session.sheetTab;
+});
+
+test('底栏「仓库 / 鱼塘 / 图鉴」：各自对准页签', function () {
+    var cases = [
+        { r: L.BAG_BTN, tab: 4, name: '仓库' },
+        { r: L.POND_BTN, tab: 3, name: '鱼塘' },
+        { r: L.CODEX_BTN, tab: 2, name: '图鉴' }
+    ];
+    var notes = [];
+    for (var i = 0; i < cases.length; i++) {
+        var env = setup();
+        var b = btnCenter(cases[i].r);
+        touch.tap(b.x, b.y, env);
+        assert(session.sheetOpen, cases[i].name + ' 应该打开面板');
+        assert(session.sheetTab === cases[i].tab,
+            cases[i].name + ' 应停在 ' + cases[i].tab + ' 页，实际 ' + session.sheetTab);
+        notes.push(cases[i].name + '=' + session.sheetTab);
+    }
+    return notes.join(' · ');
+});
+
+test('底栏「系统」：打开系统层，不打开商店面板', function () {
+    var env = setup();
+    var b = btnCenter(L.SYS_BTN);
+    touch.tap(b.x, b.y, env);
+
+    assert(session.sysOpen === true, '系统层应该打开');
+    assert(session.sheetOpen === false, '不该顺手打开商店面板');
+    return 'sysOpen=' + session.sysOpen;
+});
+
+test('系统层：清档要点两次，点关闭不执行', function () {
+    var env = setup();
+    var b = btnCenter(L.SYS_BTN);
+    touch.tap(b.x, b.y, env);
+
+    var danger = btnCenter(L.sysBtnRect(0));
+    touch.tap(danger.x, danger.y, env);
+    assert(env.cleared === 0, '第一次点击只上膛，不该清档');
+    assert(session.sysArmed > 0, '应进入上膛状态');
+    assert(session.toast && session.toast.text.indexOf('再点一次') === 0, '应提示再点一次');
+
+    touch.tap(danger.x, danger.y, env);
+    assert(env.cleared === 1, '第二次点击应执行清档，实际 ' + env.cleared);
+    assert(session.sysOpen === false, '清档后系统层应关闭');
+
+    /* 关闭按钮：不触发清档 */
+    env.session.sysOpen = true;
+    env.session.sysArmed = 0;
+    var close = btnCenter(L.sysBtnRect(1));
+    touch.tap(close.x, close.y, env);
+    assert(session.sysOpen === false, '关闭按钮应关掉系统层');
+    assert(env.cleared === 1, '关闭不该清档');
+    return 'cleared=' + env.cleared;
+});
+
+test('底栏没有「卖掉」：点鱼只选中，鱼和余额都不动', function () {
+    var env = setup();
+    var t = fishAt(env);
+    var before = env.state.coins.fish;
+
+    touch.tap(t.x, t.y, env);
+    /* 原来卖掉的坐标现在归「仓库」按钮，点了只会开仓库页 */
+    var b = btnCenter(L.BAG_BTN);
+    touch.tap(b.x, b.y, env);
+
+    assert(env.state.coins.fish === before, '不该进账');
+    assert(env.state.fish.length === 1, '鱼不该消失');
+    assert(session.sheetTab === 4, '应该打开仓库页');
+    return '余额 ' + env.state.coins.fish + ' · 鱼 ' + env.state.fish.length;
+});
+
+test('点鱼 → 信息卡 → 捞出：鱼进仓库、缸里清空、选中清掉', function () {
+    var env = setup();
+    var sink = require('../render/sell.js');
+
+    var t = fishAt(env);
+    touch.tap(t.x, t.y, env);
+    assert(env.state.view.selFish === t.f.id, '点鱼应先选中并弹卡');
+
+    var info = sink.cardHitOf(env.state);
+    assert(info && info.buttons.length >= 1, '应该有一张信息卡');
+    var dump = info.buttons[0];
+    assert(dump.key === 'dump' && dump.enabled, '第一个按钮应是「捞出到仓库」');
+
+    var bx = Math.round(dump.rect.x + dump.rect.w / 2);
+    var by = Math.round(dump.rect.y + dump.rect.h / 2);
+    touch.tap(bx, by, env);
+
+    assert(env.state.fish.length === 0, '缸里应该空出来');
+    assert(env.state.caught.length === 1, '仓库里应该多一条');
+    assert(env.state.caught[0].id === t.f.id, '捞出的应该是选中的那条');
+    assert(env.state.view.selFish === '', '捞出后应清掉选中');
+    return '鱼缸 → 仓库 · 仓库存 ' + env.state.caught.length + ' 条';
+});
+
+test('点信息卡空白：不清选中，也不撒食', function () {
+    var env = setup();
+    var sink = require('../render/sell.js');
+
+    var t = fishAt(env);
+    touch.tap(t.x, t.y, env);
+
+    var info = sink.cardHitOf(env.state);
+    var before = env.state.foods.length;
+    /* 卡片左上角内 8px：明确在按钮之外、又还在卡面上 */
+    touch.tap(info.rect.x + 8, info.rect.y + 8, env);
+
+    assert(env.state.view.selFish === t.f.id, '卡面点击不该清选中');
+    assert(env.state.foods.length === before, '卡上不该撒食');
+    assert(env.state.fish.length === 1, '也不该动鱼');
+    return '选中保留 · 饲料 ' + env.state.foods.length + ' 颗';
 });
 
 test('再点同一条鱼：取消选中', function () {
@@ -223,45 +296,23 @@ test('点缸盖（水面上方）：不撒食', function () {
     return 'y=' + y + ' · 饲料 0 颗';
 });
 
-test('点底座空白（按钮之间那条缝）：不撒食、不清选中', function () {
+test('点按钮之间的缝（底栏已删，缝也是水）：照样撒食', function () {
     var env = setup();
     var t = fishAt(env);
     touch.tap(t.x, t.y, env);
 
-    var x = Math.round(L.FEED_BTN.x + L.FEED_BTN.w / 2);
-    var y = Math.round(C.BTN_Y - 9);          /* 缸底和按钮之间的 18px 缝 */
+    /* M13 把底栏那条木板删掉了，鱼缸一直延伸到底部：
+     * 两枚悬浮按钮之间就是水面，点下去应该撒食，而不是被当成底座吞掉。 */
+    var x = Math.round((L.STORE_BTN.x + L.STORE_BTN.w + L.BAG_BTN.x) / 2);
+    var y = Math.round(C.BTN_Y + 24);
     touch.tap(x, y, env);
 
-    assert(env.state.foods.length === 0, '底座不是水面，不该掉饲料');
-    return 'y=' + y + ' · 饲料 0 颗';
+    assert(env.state.foods.length > 0, '按钮之间的缝应该算水面，实际 0 颗饲料');
+    assert(session.sheetOpen === false, '不该误开面板');
+    return 'x=' + x + ' · 饲料 ' + env.state.foods.length + ' 颗';
 });
 
-test('连续卖两条：余额按两条身价累加', function () {
-    var env = setup();
-    env.state.fish.push(fishLib.create('gold_fish', { growth: 100, tank: 0 }));
-    env.state.fish[1].x = 120;
-    env.state.fish[1].y = 400;
-    env.state.fish[0].x = 260;
-    env.state.fish[0].y = 300;
-
-    var before = env.state.coins.fish;
-    var p0 = fishLib.sellPriceOf(env.state.fish[0]);
-    var p1 = fishLib.sellPriceOf(env.state.fish[1]);
-
-    touch.tap(260, 300, env);
-    var b = btnCenter(L.SELL_BTN);
-    touch.tap(b.x, b.y, env);
-
-    touch.tap(120, 400, env);
-    touch.tap(b.x, b.y, env);
-
-    assert(env.state.fish.length === 0, '两条都该卖掉');
-    assert(env.state.coins.fish === before + p0 + p1,
-        '余额应为 ' + (before + p0 + p1) + '，实际 ' + env.state.coins.fish);
-    return '+' + (p0 + p1) + ' → ' + env.state.coins.fish;
-});
-
-test('选中态整帧渲染不报错（光圈 + 橙色卖掉按钮）', function () {
+test('选中态整帧渲染不报错（光圈 + 信息卡 + 五格底栏）', function () {
     var env = setup();
     var renderer = require('../render/index.js');
     var t = fishAt(env);
@@ -269,7 +320,7 @@ test('选中态整帧渲染不报错（光圈 + 橙色卖掉按钮）', function
     touch.tap(t.x, t.y, env);
     assert(env.state.view.selFish === t.f.id, '前置条件：应该已经选中');
 
-    /* 画两帧：选中光圈和加价按钮都在这个分支里，
+    /* 画两帧：选中光圈、信息卡和五格底栏都在这个分支里，
      * 有未定义变量/错参数会在这里直接抛出来 */
     renderer.init(env.state);
     renderer.draw(env.state, session, 0.016);

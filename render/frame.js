@@ -145,7 +145,8 @@ function draw(ctx) {
     drawGlare(ctx);
     drawWalls(ctx);
     hair(ctx, TOP, 0.7);
-    hair(ctx, BOT, 0.7);
+    /* 底部分隔线跟着底栏一起删掉了：缸体一直延伸到底，
+     * 再横一条金线会把「水到底」这句话说成「这里有个底座」 */
 }
 
 module.exports = {

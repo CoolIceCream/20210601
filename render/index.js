@@ -14,6 +14,8 @@ var hud = require('./hud.js');
 var sheet = require('./sheet.js');
 var sell = require('./sell.js');
 var modal = require('./modal.js');
+var sysmenu = require('./sysmenu.js');
+var breedRender = require('./breed.js');
 var debugPanel = require('../ui/debug-panel.js');
 var diag = require('../ui/diag.js');
 var view = require('../ui/view.js');
@@ -37,9 +39,17 @@ function stepSession(session, dt) {
     session.sheetEase += (target - session.sheetEase) * Math.min(1, dt * 14);
     if (Math.abs(session.sheetEase - target) < 0.002) session.sheetEase = target;
 
+    /* 滑动惯性：抬手后的余速在这里衰减，和面板动画同一帧推进 */
+    diag.guard('view', function () { view.update(dt); });
+
     if (session.toast) {
         session.toast.t -= dt;
         if (session.toast.t <= 0) session.toast = null;
+    }
+
+    /* 清档「上膛」只保留 3 秒，超时自动解除，避免误点 */
+    if (session.sysArmed > 0) {
+        session.sysArmed = Math.max(0, session.sysArmed - dt);
     }
 }
 
@@ -77,13 +87,22 @@ function draw(state, session, dt) {
     diag.guard('vignette', function () { hud.drawVignette(ctx); });
     diag.guard('topbar', function () { hud.drawTopBar(ctx, state); });
     diag.guard('tanktabs', function () { hud.drawTankTabs(ctx, state); });
-    diag.guard('sellbtn', function () { sell.drawSellButton(ctx, state); });
     diag.guard('buttons', function () { hud.drawButtons(ctx); });
+    /* 选中鱼的信息卡：屏幕坐标，压在按钮之上、面板之下。
+     * 面板一开始升起（even 一点）就收起来，避免和半透明的面板叠在一起。 */
+    diag.guard('fishcard', function () {
+        if (session.sheetEase > 0.02) return;
+        sell.drawCard(ctx, state);
+    });
 
     diag.guard('sheet', function () { sheet.draw(ctx, state, session); });
     diag.guard('debug', function () { debugPanel.draw(ctx, session, state); });
     /* 弹窗画在调试面板之上：它需要阻塞操作，不能被工具面板挡住 */
     diag.guard('modal', function () { modal.draw(ctx, session.modal); });
+    /* 繁育浮层盖在商店面板之上：它是「进去做一件事」的工作台 */
+    diag.guard('breed', function () { breedRender.draw(ctx, state, session); });
+    /* 系统弹层排在离线弹窗之后：两者同时出现时，系统层在最上面 */
+    diag.guard('sysmenu', function () { sysmenu.draw(ctx, state, session); });
     diag.guard('toast', function () { hud.drawToast(ctx, session); });
 
     /* 诊断条永远在最上面：上面的层全崩了，它也得能被看见 */

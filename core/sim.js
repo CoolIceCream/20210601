@@ -13,6 +13,7 @@ var fishLib = require('./fish.js');
 var shop = require('./shop.js');
 var storage = require('./storage.js');
 var predation = require('./predation.js');
+var breed = require('./breed.js');
 
 var E = cfg.economy;
 var P = E.predator || {};
@@ -351,7 +352,9 @@ function updateFish(state, f, dt, vp) {
         }
     }
 
-    f.hunger = Math.max(0, f.hunger - F.hungerDecay *
+    /* 「易养」词条：饱食消耗按比例降低，最低保留 45%（再低就等于不用喂了） */
+    var feedMul = Math.max(0.45, 1 - fishLib.traitEffect(f, 'feed') / 100);
+    f.hunger = Math.max(0, f.hunger - F.hungerDecay * feedMul *
         (pred ? (P.hungerDecayMul == null ? 1 : P.hungerDecayMul) : 1) * dt);
 
     /* 自然成长：不喂食也会长大，喂食只是加速 */
@@ -511,6 +514,14 @@ function step(state, dt, vp) {
         else updateFishManaged(state, one, dt);
     }
     predation.removeEaten(state);
+
+    /* M12 繁育：到点的蛋落进培育缸，子代在培育缸里按同一条成长曲线长大。
+     * 培育缸满了就留在孵化槽里等位置，不会凭空消失。 */
+    var bornNow = breed.tick(state);
+    for (var bi = 0; bi < bornNow.length; bi++) {
+        addFloat(state, vp.w / 2, vp.h * 0.34, '孵化完成', '#a8e0c4');
+    }
+    breed.growNursery(state, dt);
 
     var maxX = vp.w + 60;
     state.foods = state.foods.filter(function (x) {

@@ -60,15 +60,16 @@ var helper = `
   var EGG_W = W - 32;
 
   function tap(x, y) { if (window.__previewTap) window.__previewTap(x, y); }
-  /* 三个按钮平分（见 ui/layout.js）：撒食 / 卖掉 / 商店 */
-  var BTN_W = 108, BTN_GAP = 10, BTN_X0 = (W - (BTN_W * 3 + BTN_GAP * 2)) / 2;
-  function tapShop() { tap(BTN_X0 + (BTN_W + BTN_GAP) * 2 + BTN_W / 2, BTN_Y + 37); }
+  /* 五个入口平分（见 ui/layout.js）：商店 / 仓库 / 鱼塘 / 图鉴 / 系统 */
+  var BTN_GAP = 8, BTN_W = (W - 28 - BTN_GAP * 4) / 5, BTN_X0 = 14;
+  function tapBar(i) { tap(BTN_X0 + (BTN_W + BTN_GAP) * i + BTN_W / 2, BTN_Y + 37); }
+  function tapShop() { tapBar(0); }
   function tapTab(i) { tap(18 + i * 92 + 42, ST + 52 + 15); }
   function tapBuy(i) { tap(W - 104 + 39, ST + ITEM_TOP + i * (ITEM_H + ITEM_GAP) + 16 + 19); }
   function tapEgg(i) {
     tap(W / 2, ST + EGG_TOP + i * (EGG_H + EGG_GAP) + EGG_H / 2);
   }
-  function tapFeed() { tap(BTN_X0 + BTN_W / 2, BTN_Y + 37); }
+  function tapFeed() { tap(W / 2, BTN_Y - 120); }   /* 撒食改为点水面 */
 `;
 
 /* ---------------- 存档种子 ---------------- */

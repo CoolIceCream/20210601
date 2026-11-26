@@ -30,7 +30,11 @@ function drawOne(ctx, f, t) {
         belly: f.belly || 0,
         growth: f.growth,
         hunger: f.hunger,
-        glow: !!(f.traits && f.traits.length)
+        /* 进化阶：金鲤鱼 → 金纹鲤 → 蛟 → 真龙，外形在 fishart 里按它加分 */
+        evo: fishLib.evoOf(f),
+        /* 词条等级够了才发光：现在每条鱼都有词条，
+         * 还用「有词条就发光」等于全场都亮，等于没有提示。 */
+        glow: fishLib.traitSumOf(f) >= 4
     });
     ctx.restore();
 }

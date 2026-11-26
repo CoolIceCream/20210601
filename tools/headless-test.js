@@ -188,6 +188,7 @@ test('喂食：饱了也吃，多出的营养折成鱼币', function () {
 test('自然成长：不喂食也会随时间长大', function () {
     var s = stateModule.bootstrapFresh();
     var f = s.fish[0];
+    f.traits = [];          /* 排除「快长」词条的干扰，这条只验基础成长曲线 */
     f.growth = 10;
     f.hunger = 100;
     f.mood = 100;
@@ -286,7 +287,7 @@ test('买卵：随机开出该品质的鱼，且带品质与名字', function ()
     assert(r.species && r.species.name, '应返回物种信息');
     assert(r.species.rarity === 'R', '买 R 卵不该开出 ' + r.species.rarity);
     assert(s.fish.length === 1, '应入缸一条');
-    assert(fishLib.all.length === 10, '应有 10 条鱼种（含 0.1% 彩蛋小鲨鱼）');
+    assert(fishLib.all.length === 11, '应有 11 条鱼种（含彩蛋小鲨鱼与传奇金鲤鱼）');
 
     /* 每条鱼都要有专属外形参数，否则会退化成小金鱼，缸里看着像同一种 */
     var art = require('../render/fishart.js');
@@ -581,36 +582,50 @@ test('经济闭环：养大就卖、有钱就买，30 分钟不失控', function
 
 /* ---------------- M1：词条 ---------------- */
 
-test('词条：高产倍率线性放大产出', function () {
-    var a = adultFish('gold_fish');
-    var base = fishLib.incomePerSecond(a.fish);
-    a.fish.traits = [{ id: 'output_up', value: 2.5 }];
-    var boosted = fishLib.incomePerSecond(a.fish);
-    near(boosted / base, 2.5, 1e-9, '高产词条应按倍率放大');
-    return base.toFixed(2) + ' → ' + boosted.toFixed(2) + '（×2.5）';
+test('词条：卖价按 Σ等级 提升（1 + 0.06 × Σlv）', function () {
+    var per = cfg.traits.sellPerLv;
+    var a = fishLib.create('gold_fish', { growth: 100, traits: [] });
+    var b = fishLib.create('gold_fish', { growth: 100, traits: [{ id: 'gold_scale', lv: 3 }] });
+    near(fishLib.sellPriceOf(b) / fishLib.sellPriceOf(a), 1 + per * 3, 0.02, 'L3 应加成 18%');
+
+    /* 两条词条按总和算，不看种类：SSR 2 槽 × L2 = Σ4 */
+    var base = fishLib.sellPriceOf(fishLib.create('dusk_betta', { growth: 100, traits: [] }));
+    var two = fishLib.sellPriceOf(fishLib.create('dusk_betta', {
+        growth: 100,
+        traits: [{ id: 'gold_scale', lv: 2 }, { id: 'fast_grow', lv: 2 }]
+    }));
+    near(two / base, 1 + per * 4, 0.02, 'Σlv=4 应加成 24%');
+
+    /* 老档 {id,value} 也要能读：3.2 倍率折算成 L2（1.5–2.67 / 2.67–3.83 / 3.83–5） */
+    var old = fishLib.create('gold_fish', { growth: 100, traits: [{ id: 'output_up', value: 3.2 }] });
+    assert(old.traits[0].id === 'gold_scale', '老「高产」应迁移成金鳞');
+    assert(old.traits[0].lv === 2, '倍率 3.2 应折算成 L2，实际 ' + old.traits[0].lv);
+    return 'L3 +18% · Σ4 +24% · 老档折 L2';
 });
 
-test('词条：掉落概率随品质上升，且带合法倍率', function () {
+test('词条：每条鱼都有槽位，上限随稀有度，L5 只能靠繁育', function () {
     assert(cfg.traits.enabled, '词条系统应已开启');
-    var n = 3000;
-    var rC = 0;
-    var ssrC = 0;
+    var n = 600;
     var rSp = fishLib.speciesById('gold_fish');
-    var sSp = fishLib.speciesById('silver_dragon');
+    var sSp = fishLib.speciesById('dusk_betta');
+    var rMax = 0;
+    var sMax = 0;
     for (var i = 0; i < n; i++) {
-        if (fishLib.rollTraits(rSp).length) rC += 1;
-        if (fishLib.rollTraits(sSp).length) ssrC += 1;
-    }
-    assert(ssrC > rC * 2, 'SSR 掉词条应明显多于 R（' + rC + ' vs ' + ssrC + '）');
-    assert(rC > 0 && rC < n * 0.2, 'R 概率应在合理区间，实际 ' + rC + '/' + n);
+        var rt = fishLib.rollTraits(rSp);
+        assert(rt.length === 1, 'R 应正好 1 个槽，实际 ' + rt.length);
+        rMax = Math.max(rMax, rt[0].lv);
 
-    var t = fishLib.rollTraits(sSp);
-    if (t.length) {
-        assert(t[0].id === 'output_up', '当前只应掉高产');
-        assert(t[0].value >= cfg.traits.list[0].min && t[0].value <= cfg.traits.list[0].max,
-            '倍率应在 ' + cfg.traits.list[0].min + '–' + cfg.traits.list[0].max + ' 之间');
+        var st = fishLib.rollTraits(sSp);
+        assert(st.length === 2, 'SSR 应正好 2 个槽，实际 ' + st.length);
+        assert(st[0].id !== st[1].id, '同一条鱼不该有两个相同词条');
+        sMax = Math.max(sMax, st[0].lv, st[1].lv);
     }
-    return 'R ' + (rC / n * 100).toFixed(1) + '% · SSR ' + (ssrC / n * 100).toFixed(1) + '%';
+    assert(rMax <= 3, 'R 等级不应超过 L3，实际 L' + rMax);
+    assert(sMax <= 4, '自然掉落不该出现 L5，实际 L' + sMax);
+
+    /* 捕食者是彩蛋：不参与词条，也不能繁育 */
+    assert(fishLib.rollTraits(fishLib.speciesById('reef_shark')).length === 0, '鲨鱼不该有词条');
+    return 'R 1槽上限 L' + rMax + ' · SSR 2槽上限 L' + sMax;
 });
 
 test('长时间步进：3600 帧不崩，坐标不出现 NaN', function () {

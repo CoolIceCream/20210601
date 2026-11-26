@@ -92,5 +92,32 @@ module.exports = [
         sizeScale: 1.34, incomeMul: 85.0, matureSeconds: 2100, feedMul: 0.28,
         drawWeight: 0.22,
         desc: '缸里的顶级收藏，产出是全缸基准的八十五倍'
+    },
+
+    /* ---------- 传奇 · 金鲤鱼（M14） ----------
+     * 只从「传奇鱼卵」里 10% 掉出，不进任何普通卵池、也钓不到。
+     * 它身上可能带专属词条「龙鳞」：带龙鳞的金鲤鱼能吞噬同族，
+     * 每吞一条升一阶，第三阶化龙。
+     *
+     * evo 字段就是进化阶梯：
+     *   mul      卖价 / 产出倍率（卵价不吃这一层，只影响成体）
+     *   sizeMul  体型倍率（观感 + sizeOf）
+     * 数值定得比金龙鱼高一档 —— 它是「传奇」，也是四条传奇卵才养得起的产物。 */
+    {
+        id: 'gold_koi', name: '金鲤鱼', rarity: 'SSR', palette: 3,
+        sizeScale: 1.32, incomeMul: 150.0, matureSeconds: 2700, feedMul: 0.26,
+        drawWeight: 0, eggRate: 0, secret: true, legendOnly: true,
+        desc: '传奇鱼卵 10% 的稀客 · 带「龙鳞」的可吞噬同族，三阶化龙',
+        evo: {
+            stages: [
+                { name: '金鲤鱼', mul: 1.0, sizeMul: 1.0 },
+                { name: '金纹鲤', mul: 1.6, sizeMul: 1.10 },
+                { name: '蛟', mul: 2.5, sizeMul: 1.22 },
+                { name: '真龙', mul: 4.2, sizeMul: 1.38 }
+            ],
+            /* 每阶要吃几条同族金鲤鱼（第三阶吃完就是真龙） */
+            need: 1,
+            max: 3
+        }
     }
 ];

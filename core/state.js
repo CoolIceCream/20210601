@@ -51,6 +51,17 @@ function create() {
         },
         caught: [],
 
+        /* ---- M12 繁育 ----
+         * hatchery  孵化槽队列：{ id, speciesId, sex, traits, motherId, fatherId,
+         *                        startAt, hatchAt, seconds, twin }
+         * nursery   培育缸：子代落点，结构与 fish 同构（含 traits / sex）
+         * nurseryLv 培育缸等级（1=普通，6 格）
+         * breedSeq  子代编号用的自增数 */
+        hatchery: [],
+        nursery: [],
+        nurseryLv: 1,
+        breedSeq: 0,
+
         /* ---- 图鉴收录：曾经拥有过的鱼种（卖掉/被吃也算） ----
          * { speciesId: { n: 累计条数, t: 首次获得时间 } } */
         discovered: {},
@@ -95,7 +106,7 @@ function create() {
 /* 开局：一条鱼 */
 function bootstrapFresh() {
     var s = create();
-    var f = fishFactory.create(cfg.species[0].id, { growth: 6 });
+    var f = fishFactory.create(cfg.species[0].id, { growth: 6, rollTraits: true });
     f.x = 195;
     f.y = 300;
     s.fish.push(f);

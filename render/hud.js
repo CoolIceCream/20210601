@@ -201,31 +201,41 @@ function pillBase(ctx, r) {
     });
 }
 
+/* 胶囊的左右内边距：图标贴左、数值贴右，两端各留 10px，
+ * 不靠「左对齐 + 目测留白」—— 数值位数一变就会歪。 */
+var PILL_PAD = 10;
+
 function drawCoinPill(ctx, state) {
     var r = L.COIN_PILL;
     var cy = r.y + r.h / 2;
     pillBase(ctx, r);
 
-    drawCoin(ctx, r.x + 15, cy, 9);
+    /* 金币半径 8，圆心离左内边距 8 → 左边缘正好落在 pad 上，
+     * 27 高的胶囊里上下也各有 5.5 的空间，不会顶到描边。 */
+    drawCoin(ctx, r.x + PILL_PAD + 8, cy, 8);
 
     var val = wallet.display(state, 'fish');
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = '800 15px sans-serif';
-    ctx.fillStyle = TT.text;
-    ctx.fillText(wallet.format(val), r.x + 29, cy + 0.5);
-
-    /* S 币极少出现，有余额才在右端冒一个小蓝章 */
     var s = wallet.display(state, 's');
+
+    ctx.textBaseline = 'middle';
+    var right = r.x + r.w - PILL_PAD;
+
+    /* S 币极少出现，有余额时才在最右端占一小块，主数值往左让位 */
     if (s > 0) {
         var st = wallet.format(s);
         ctx.textAlign = 'right';
         ctx.font = '800 11px sans-serif';
         ctx.fillStyle = TT.sky;
-        ctx.fillText(st, r.x + r.w - 9, cy + 0.5);
+        ctx.fillText(st, right, cy + 0.5);
         var sw = ctx.measureText(st).width;
-        drawCoinBlue(ctx, r.x + r.w - 9 - sw - 8, cy, 7);
+        drawCoinBlue(ctx, right - sw - 7, cy, 6.5);
+        right = right - sw - 16;
     }
+
+    ctx.textAlign = 'right';
+    ctx.font = '800 15px sans-serif';
+    ctx.fillStyle = TT.text;
+    ctx.fillText(wallet.format(val), right, cy + 0.5);
 }
 
 function drawFishPill(ctx, state) {
@@ -237,18 +247,23 @@ function drawFishPill(ctx, state) {
      * 这条胶囊读的是「所有缸加起来一共有几条鱼」。 */
     var total = (state.fish && state.fish.length) || 0;
 
-    drawFishIcon(ctx, r.x + 16, cy, 8.5, '#6fbf9e');
+    /* 鱼形尾巴向左伸到 -2.0s，所以 s 必须收小、圆心必须右移：
+     * s=6.5 / 圆心在 pad+9 时，左边缘 = pad + 9 - 13 = pad - 4，
+     * 仍可能碰到圆角描边，于是再往里推 4px。 */
+    drawFishIcon(ctx, r.x + PILL_PAD + 13, cy, 6.5, '#6fbf9e');
 
-    ctx.textAlign = 'left';
+    var right = r.x + r.w - PILL_PAD;
+
     ctx.textBaseline = 'middle';
-    ctx.font = '800 15px sans-serif';
-    ctx.fillStyle = TT.text;
-    ctx.fillText(String(total), r.x + 29, cy + 0.5);
-
+    ctx.textAlign = 'right';
     ctx.font = '700 11px sans-serif';
     ctx.fillStyle = TT.textSoft;
-    var nw = ctx.measureText(String(total)).width;
-    ctx.fillText('条', r.x + 31 + nw, cy + 0.5);
+    ctx.fillText('条', right, cy + 1);
+    var uw = ctx.measureText('条').width;
+
+    ctx.font = '800 15px sans-serif';
+    ctx.fillStyle = TT.text;
+    ctx.fillText(String(total), right - uw - 2, cy + 0.5);
 }
 
 function drawTopBar(ctx, state) {
@@ -291,59 +306,108 @@ function drawTankTabs(ctx, state) {
     ctx.restore();
 }
 
-/* ---------------- 底部按钮 ----------------
- * 一拍三格：撒食 / 卖掉（sell.js）/ 商店。
- * 卡面统一浅米色，功能靠上面那枚彩色徽章区分 ——
- * 这是参考图的做法，比整块染成彩色更像一套按钮，也不会互相抢眼。
+/* ---------------- 底部悬浮按钮 ----------------
+ * M13 换了一版造型（照玩家给的参考图）：
+ *   上面一枚厚木圈的圆形徽章，奶油底 + 手画图标；
+ *   下面压一张胶囊标签，木棕色底 + 浅木色描边 + 奶油字。
+ * 原来那条底栏木板删掉了，五枚按钮直接浮在水底，
+ * 鱼缸一路延伸到底部，按钮像「站在沙地上」的路牌。
  */
 
-function drawIconButton(ctx, r, o) {
-    Th.jelly(ctx, r.x, r.y, r.w, r.h, {
-        top: TT.cardTop,
-        bottom: TT.cardBottom,
-        deep: TT.cardDeep,
-        r: 22,
-        depth: 5,
-        ink: TT.ink,
-        lw: 2.6,
-        gloss: false
-    });
+var DOCK_DEFS = [
+    { key: 'STORE_BTN', icon: 'shop', label: '商店' },
+    { key: 'BAG_BTN', icon: 'warehouse', label: '仓库' },
+    { key: 'POND_BTN', icon: 'tank', label: '鱼塘' },
+    { key: 'CODEX_BTN', icon: 'book', label: '图鉴' },
+    { key: 'SYS_BTN', icon: 'menu', label: '系统' }
+];
 
+/* 木色系（和描金主线同族，但更暖，压得住水底那层深蓝） */
+var DOCK_INK = '#43280f';       /* 木框描边 */
+var DOCK_RING_TOP = '#f4dfb9';
+var DOCK_RING_BOT = '#c9a067';
+var DOCK_FACE_TOP = '#fffbea';
+var DOCK_FACE_BOT = '#ecd0a2';
+var DOCK_PILL_TOP = '#c47e42';
+var DOCK_PILL_BOT = '#8c5124';
+var DOCK_PILL_EDGE = '#f7e2bd';
+var DOCK_ICON = '#8d5a2b';      /* 奶油底上的图标色：木棕 */
+
+var DOCK_TXT = '#fff8ea';
+
+function drawDockButton(ctx, i, r, o) {
+    var rad = L.BTN_R;
     var cx = r.x + r.w / 2;
-    var cy = r.y + 27;
+    var cy = r.y + rad + 1;
 
-    Th.badge(ctx, cx, cy, 19, {
-        top: o.top,
-        bottom: o.bottom,
-        ink: o.ink,
-        lw: 2.4
-    });
+    /* 投影：按钮是浮在水上的，底下压一团软阴影才不飘 */
+    ctx.beginPath();
+    ctx.arc(cx, cy + 4, rad + 3, 0, 6.2832);
+    ctx.fillStyle = 'rgba(4,8,20,0.42)';
+    ctx.fill();
 
-    itemArt.draw(ctx, o.icon, cx, cy, 28);
+    /* 外圈：厚木环 */
+    var rg = ctx.createLinearGradient(cx, cy - rad - 3, cx, cy + rad + 3);
+    U.stop(rg, 0, DOCK_RING_TOP);
+    U.stop(rg, 1, DOCK_RING_BOT);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad + 2.5, 0, 6.2832);
+    ctx.fillStyle = rg;
+    ctx.fill();
+    ctx.strokeStyle = DOCK_INK;
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    /* 里圈：奶油底，图标画在上面 */
+    var fg = ctx.createRadialGradient(cx - rad * 0.3, cy - rad * 0.45, 2, cx, cy, rad);
+    U.stop(fg, 0, DOCK_FACE_TOP);
+    U.stop(fg, 1, DOCK_FACE_BOT);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad - 3.4, 0, 6.2832);
+    ctx.fillStyle = fg;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,82,38,0.45)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    /* 图标：往上抬 3px，给下面的胶囊让位。
+     * 奶油底上不能用白图标（会糊掉），切成木棕色，和参考图一致。 */
+    itemArt.draw(ctx, o.icon, cx, cy - 3, rad * 1.12, null, DOCK_ICON);
+
+    /* 胶囊标签：压在圆底上，像挂在徽章下面的木牌 */
+    var p = L.dockPillRect(i);
+
+    U.roundRect(ctx, p.x, p.y + 2.5, p.w, p.h, p.h / 2);
+    ctx.fillStyle = 'rgba(48,24,6,0.42)';
+    ctx.fill();
+
+    var pg = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
+    U.stop(pg, 0, DOCK_PILL_TOP);
+    U.stop(pg, 1, DOCK_PILL_BOT);
+    U.roundRect(ctx, p.x, p.y, p.w, p.h, p.h / 2);
+    ctx.fillStyle = pg;
+    ctx.fill();
+    ctx.strokeStyle = DOCK_PILL_EDGE;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    /* 牌子上沿一点高光，木牌才有厚度 */
+    U.roundRect(ctx, p.x + 4, p.y + 2.5, p.w - 8, p.h * 0.32, p.h * 0.16);
+    ctx.fillStyle = 'rgba(255,240,210,0.22)';
+    ctx.fill();
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '800 13px sans-serif';
-    ctx.fillStyle = TT.text;
-    ctx.fillText(o.label, cx, r.y + 61);
+    ctx.font = '800 ' + (p.w < 50 ? 11 : 12) + 'px sans-serif';
+    ctx.fillStyle = DOCK_TXT;
+    ctx.fillText(o.label, p.x + p.w / 2, p.y + p.h / 2 + 0.5);
 }
 
 function drawButtons(ctx) {
-    drawIconButton(ctx, L.FEED_BTN, {
-        icon: 'feed',
-        label: '撒食',
-        top: '#6fbf9e',
-        bottom: '#2f7a5e',
-        ink: '#1a5540'
-    });
-
-    drawIconButton(ctx, L.SHOP_BTN, {
-        icon: 'menu',
-        label: '系统',
-        top: '#d8b96e',
-        bottom: '#a8802f',
-        ink: '#6f5220'
-    });
+    for (var i = 0; i < DOCK_DEFS.length; i++) {
+        var d = DOCK_DEFS[i];
+        drawDockButton(ctx, i, L[d.key], d);
+    }
 }
 
 /* ---------------- 其它 ---------------- */
@@ -372,7 +436,7 @@ function drawFloaters(ctx, state) {
 function drawHint(ctx, state) {
     if (state.hint <= 0) return;
 
-    var txt = '点鱼选中，再点「卖掉」换钱';
+    var txt = '点鱼查看 · 捞出到仓库';
     ctx.save();
     ctx.globalAlpha = Math.min(1, state.hint);
     ctx.textAlign = 'center';
@@ -432,43 +496,30 @@ function drawToast(ctx, session) {
     ctx.restore();
 }
 
-/* ---------------- 鱼缸缩放（M8） ---------------- */
-
+/* ---------------- 鱼缸缩放（M10：只留倍率角标） ----------------
+ * +/− 按钮已删除，玻璃整块还给鱼。放大后只在右上角留一个
+ * 小角标显示当前倍率，顺便提醒「双击还原」，不拦截任何点击。 */
 function drawZoom(ctx) {
     var z = view.state.zoom;
+    if (!(z > 1.001)) return;
 
-    function one(r, txt, on) {
-        var cx = r.x + r.w / 2;
-        var cy = r.y + r.h / 2;
-        Th.badge(ctx, cx, cy, r.w / 2, {
-            top: on ? '#e0c170' : TT.cardTop,
-            bottom: on ? '#a8802f' : TT.cardBottom,
-            ink: on ? TT.gold : TT.goldDeep,
-            lw: 2,
-            gloss: on
-        });
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = '800 18px sans-serif';
-        ctx.fillStyle = on ? '#fff3d2' : TT.textSoft;
-        ctx.fillText(txt, cx, cy + 0.5);
-    }
+    var r = L.ZOOM_BADGE;
+    Th.jelly(ctx, r.x, r.y, r.w, r.h, {
+        top: 'rgba(38,49,80,0.86)',
+        bottom: 'rgba(26,35,64,0.86)',
+        deep: 'rgba(6,10,24,0.45)',
+        r: 10,
+        depth: 2,
+        ink: 'rgba(200,164,92,0.5)',
+        lw: 1.6,
+        gloss: false
+    });
 
-    one(L.ZOOM_OUT, '−', z > 1);
-    one(L.ZOOM_IN, '+', z < 2);
-
-    /* 档位读数放在两枚按钮下方，不写字幕挡鱼 */
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '800 10px sans-serif';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(6,10,24,0.92)';
-    ctx.lineWidth = 3;
-    var lx = (L.ZOOM_OUT.x + L.ZOOM_IN.x + L.ZOOM_IN.w) / 2;
-    var ly = L.ZOOM_OUT.y + L.ZOOM_OUT.h + 9;
-    ctx.strokeText(view.label(), lx, ly);
+    ctx.font = '800 11px sans-serif';
     ctx.fillStyle = TT.goldLight;
-    ctx.fillText(view.label(), lx, ly);
+    ctx.fillText(view.label(), r.x + r.w / 2, r.y + r.h / 2 + 0.5);
 }
 
 module.exports = {

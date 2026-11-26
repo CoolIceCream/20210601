@@ -118,15 +118,21 @@ function zoomCenter(r) {
 
 /* ---------------- 用例 ---------------- */
 
-test('档位：1× → 1.5× → 2× 封顶，逐级缩回 1×', function () {
+test('捏合缩放：1× 下限、2× 上限', function () {
     setup();
     assert(view.state.zoom === 1, '初始应为 1×');
-    assert(view.step(1) === 1.5, '第一下应到 1.5×');
-    assert(view.step(1) === 2, '第二下应到 2×');
-    assert(view.step(1) === 2, '2× 应该封顶');
-    assert(view.step(-1) === 1.5, '应缩回 1.5×');
-    assert(view.step(-1) === 1, '应回到 1×');
-    return '四档切换正常';
+    assert(view.pinch(1.5) === 1.5, '×1.5 应到 1.5×');
+    assert(view.pinch(2) === 2, '再放大应封顶 2×');
+    assert(view.pinch(5) === 2, '超过 2× 仍应停在 2×');
+    assert(view.pinch(0.1) === 1, '缩小应停在下限 1×');
+    return '1× ⇄ 2× 夹紧';
+});
+
+test('缩放按钮已移除，布局里不再留命中区', function () {
+    setup();
+    assert(L.ZOOM_IN === undefined && L.ZOOM_OUT === undefined, '不应再导出缩放按钮矩形');
+    assert(typeof L.ZOOM_BADGE === 'object', '只保留只读倍率角标');
+    return '仅双指缩放 / 单指滑动';
 });
 
 test('平移被限制在玻璃内，1× 时不能拖动', function () {
@@ -183,16 +189,42 @@ test('apply() 只做 translate / scale / translate，不改其它状态', functi
     return ops.map(function (o) { return o.join(','); }).join(' | ');
 });
 
-test('点右上角 + 按钮：第一次 1.5×，第二次 2×', function () {
+test('单指滑动平移并带惯性，抬手不算点击', function () {
     var env = setup();
-    var p = zoomCenter(L.ZOOM_IN);
-    gesture([p[0], p[1]]);
-    assert(view.state.zoom === 1.5, '点 + 应到 1.5×，实际 ' + view.state.zoom);
-    gesture([p[0], p[1]]);
-    assert(view.state.zoom === 2, '再点 + 应到 2×，实际 ' + view.state.zoom);
-    gesture(zoomCenter(L.ZOOM_OUT));
-    assert(view.state.zoom === 1.5, '点 − 应回到 1.5×');
-    return '按钮命中区 ' + JSON.stringify(L.ZOOM_IN);
+    view.setZoom(2);
+    var foodsBefore = env.state.foods.length;
+    var x0 = view.state.x;
+
+    gesture([200, 300], [280, 340], [280, 340]);
+
+    assert(view.state.x !== x0, '滑动应产生平移，实际 ' + view.state.x);
+    assert(env.state.foods.length === foodsBefore, '滑动不该掉饲料');
+    assert(!env.state.view.selFish, '滑动不该选中鱼');
+    return 'offset=' + view.state.x.toFixed(0) + ',' + view.state.y.toFixed(0);
+});
+
+test('惯性：抬手后继续滑一段并逐渐衰减', function () {
+    setup();
+    view.setZoom(2);
+    view.pan(10, 0);
+    var x0 = view.state.x;
+    view.fling(400, 0);
+    view.update(0.05);
+    assert(view.state.x > x0, '惯性应继续向前，实际 ' + view.state.x + ' vs ' + x0);
+    assert(view.vel.x < 400 && view.vel.x > 0, '速度应衰减但不归零，实际 ' + view.vel.x);
+    for (var i = 0; i < 60; i++) view.update(0.016);
+    assert(view.vel.x === 0, '一秒后惯性应停下');
+    var xEnd = view.state.x;
+    view.reset();
+    return 'x ' + x0.toFixed(1) + ' → ' + xEnd.toFixed(1);
+});
+
+test('1× 时滑动不会留下偏移（没有可移动空间）', function () {
+    var env = setup();
+    gesture([200, 300], [280, 340], [280, 340]);
+    assert(view.state.x === 0 && view.state.y === 0, '1× 不该有偏移');
+    assert(view.vel.x === 0 && view.vel.y === 0, '1× 不该保留惯性');
+    return '偏移被夹紧到 0';
 });
 
 test('放大后拖动只平移，不撒食也不选中', function () {
