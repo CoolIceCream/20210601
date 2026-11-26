@@ -11,6 +11,7 @@
  * ============================================================ */
 
 var C = require('./canvas.js');
+var U = require('./util.js');
 var L = require('../ui/layout.js');
 var cfg = require('../config/index.js');
 var fishLib = require('../core/fish.js');
@@ -131,62 +132,69 @@ function drawHeader(ctx, c) {
     ctx.fillText('✕', r.x + r.w / 2, r.y + r.h / 2 + 0.5);
 }
 
-/* ---------------- 孵化槽 ---------------- */
+/* ---------------- 培育栏位 ----------------
+ * M16：孵化槽 3 → 培育栏位 6，蛋不再自动孵，
+ * 要在仓库里点「孵化」才进来倒数，所以这里只显示"正在孵的"。 */
 
 function drawHatch(ctx, state, session, c) {
     var eggs = breed.hatchList(state);
-    var total = cfg.breed.slots || 3;
+    var total = breed.hatchSlotsOf(state);
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = '700 11px sans-serif';
     ctx.fillStyle = TT.textSoft;
-    ctx.fillText('孵化槽 ' + eggs.length + '/' + total, c.x + 14, c.y + L.BR_HATCH_Y - 9);
+    ctx.fillText('培育栏位 ' + eggs.length + '/' + total, c.x + 14, c.y + L.BR_SLOT_LABEL_Y);
+
+    ctx.textAlign = 'right';
+    ctx.font = '600 9.5px sans-serif';
+    ctx.fillStyle = 'rgba(232,212,160,0.42)';
+    ctx.fillText('到点自动进鱼篓', c.x + c.w - 14, c.y + L.BR_SLOT_LABEL_Y);
 
     for (var i = 0; i < total; i++) {
         var r = L.hatchSlotRect(i);
         var e = eggs[i];
 
         Th.card(ctx, r.x, r.y, r.w, r.h, {
-            r: 14, depth: 2,
-            ink: e && e.ready ? TT.gold : 'rgba(200,164,92,0.30)',
-            lw: e && e.ready ? 2 : 1.6
+            r: 12, depth: 2,
+            ink: e && e.ready ? TT.gold : 'rgba(200,164,92,0.26)',
+            lw: e && e.ready ? 2 : 1.5
         });
 
         if (!e) {
-            /* 空槽：虚线蛋轮廓 */
+            /* 空位：虚线蛋轮廓 */
             ctx.save();
             ctx.beginPath();
-            ctx.ellipse(r.x + r.w / 2, r.y + 20, 11, 14, 0, 0, 6.2832);
-            ctx.strokeStyle = 'rgba(200,164,92,0.22)';
-            ctx.lineWidth = 1.6;
+            ctx.ellipse(r.x + r.w / 2, r.y + 24, 10, 13, 0, 0, 6.2832);
+            ctx.strokeStyle = 'rgba(200,164,92,0.2)';
+            ctx.lineWidth = 1.5;
             ctx.stroke();
             ctx.restore();
 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.font = '600 10px sans-serif';
-            ctx.fillStyle = 'rgba(232,212,160,0.34)';
-            ctx.fillText('空槽', r.x + r.w / 2, r.y + 46);
+            ctx.font = '600 9.5px sans-serif';
+            ctx.fillStyle = 'rgba(232,212,160,0.3)';
+            ctx.fillText('空位', r.x + r.w / 2, r.y + 48);
             continue;
         }
 
-        drawEgg(ctx, r.x + r.w / 2, r.y + 20, 21, 26, e.ready, e.twin, state.t);
+        drawEgg(ctx, r.x + r.w / 2, r.y + 24, 20, 25, e.ready, e.twin, state.t);
 
-        /* 进度条 */
-        var bw = r.w - 20;
-        rr(ctx, r.x + 10, r.y + r.h - 12, bw, 5, 2.5);
+        /* 进度条：贴格子下沿 */
+        var bw = r.w - 16;
+        rr(ctx, r.x + 8, r.y + r.h - 8, bw, 3.5, 1.75);
         ctx.fillStyle = 'rgba(8,14,30,0.55)';
         ctx.fill();
-        rr(ctx, r.x + 10, r.y + r.h - 12, Math.max(2, bw * e.progress), 5, 2.5);
+        rr(ctx, r.x + 8, r.y + r.h - 8, Math.max(2, bw * e.progress), 3.5, 1.75);
         ctx.fillStyle = e.ready ? TT.gold : '#6f9fc4';
         ctx.fill();
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = '800 10.5px sans-serif';
+        ctx.font = '800 10px sans-serif';
         ctx.fillStyle = e.ready ? TT.goldLight : TT.text;
-        ctx.fillText(e.ready ? '可孵化' : clock(e.left), r.x + r.w / 2, r.y + 45);
+        ctx.fillText(e.ready ? '可孵' : clock(e.left), r.x + r.w / 2, r.y + 48);
     }
 }
 
@@ -261,15 +269,18 @@ function drawParentSlot(ctx, state, session, k, fishId) {
     ctx.fillStyle = TT.textSoft;
     ctx.fillText(sp.rarity + ' · Σlv ' + fishLib.traitSumOf(f), r.x + 70, r.y + 50);
 
-    /* 成长 / 疲劳 */
+    /* 成长 / 疲劳：320 宽时这张卡只有 131px，整行会溢出，按剩余宽度截断 */
     ctx.font = '600 9.5px sans-serif';
+    var infoW = Math.max(30, r.w - 58 - 6);
     if (fatigue > 0) {
         ctx.fillStyle = '#e8a98e';
-        ctx.fillText('疲劳 ' + clock(fatigue), r.x + 58, r.y + 66);
+        ctx.fillText('疲劳 ' + clock(fatigue), r.x + 58, r.y + 62);
     } else {
         ctx.fillStyle = TT.textSoft;
-        ctx.fillText('成长 ' + Math.round(f.growth) + '% · 卖 ' + wallet.format(fishLib.sellPriceOf(f, state.shellLv)),
-            r.x + 58, r.y + 66);
+        var gtxt = '成长 ' + Math.round(f.growth) + '%';
+        var ftxt = gtxt + ' · 卖 ' + wallet.format(fishLib.sellPriceOf(f, state.shellLv));
+        /* 窄屏放不下就连卖价一起省掉，只留成长 —— 卖价在选鱼列表和详情里都能看到 */
+        ctx.fillText(ctx.measureText(ftxt).width <= infoW ? ftxt : gtxt, r.x + 58, r.y + 62);
     }
 
     /* 词条小条：最多两条，放得下就画 */
@@ -311,22 +322,35 @@ function drawPreview(ctx, state, session, c, chk) {
     var sp = chk.species;
     var slots = fishLib.traitSlotsOf(sp);
     var maxLv = fishLib.traitMaxLvOf(sp);
+    var cy2 = r.y + r.h / 2;
+
+    /* 右端消耗先量宽度，左边再按剩余空间截断 ——
+     * 320 宽的机器上「上限 L3 · 180s」和「鱼饵×3」原来会撞在一起。 */
+    var coinTxt = chk.cost.coin > 0 ? wallet.format(chk.cost.coin) : '免费';
+    var rightTxt = coinTxt + ' · 鱼饵×' + chk.cost.bait;
+    ctx.font = '700 10.5px sans-serif';
+    var rightW = ctx.measureText(rightTxt).width;
 
     ctx.textAlign = 'left';
     ctx.font = '800 11.5px sans-serif';
     ctx.fillStyle = TT.goldLight;
-    ctx.fillText('预计 ' + sp.name, r.x + 12, r.y + r.h / 2);
+    var nameTxt = '预计 ' + sp.name;
+    ctx.fillText(nameTxt, r.x + 12, cy2);
+    var nameW = ctx.measureText(nameTxt).width;
 
     ctx.font = '600 10.5px sans-serif';
     ctx.fillStyle = TT.textSoft;
-    ctx.fillText(slots + ' 槽 · 上限 L' + maxLv + ' · ' + chk.seconds + 's', r.x + 12 + 74, r.y + r.h / 2);
+    var avail = Math.max(24, r.w - 24 - rightW - nameW - 16);
+    var subFull = slots + ' 槽 · 上限 L' + maxLv + ' · ' + chk.seconds + 's';
+    var subShort = slots + ' 槽 · ≤L' + maxLv + ' · ' + chk.seconds + 's';
+    var subTxt = ctx.measureText(subFull).width <= avail ? subFull
+        : (ctx.measureText(subShort).width <= avail ? subShort : U.fitText(ctx, subFull, avail));
+    ctx.fillText(subTxt, r.x + 12 + nameW + 8, cy2);
 
-    /* 右端消耗 */
-    var coinTxt = chk.cost.coin > 0 ? wallet.format(chk.cost.coin) : '免费';
     ctx.textAlign = 'right';
     ctx.font = '700 10.5px sans-serif';
     ctx.fillStyle = chk.cost.coin > 0 ? TT.goldLight : TT.textSoft;
-    ctx.fillText(coinTxt + ' · 鱼饵×' + chk.cost.bait, r.x + r.w - 12, r.y + r.h / 2);
+    ctx.fillText(rightTxt, r.x + r.w - 12, cy2);
 }
 
 function drawGo(ctx, session, c, chk) {
@@ -347,65 +371,6 @@ function drawGo(ctx, session, c, chk) {
     ctx.font = '800 14px sans-serif';
     ctx.fillStyle = on ? '#fff3d2' : 'rgba(232,212,160,0.4)';
     ctx.fillText(on ? '开始繁育' : (chk.text || '还不能繁育'), r.x + r.w / 2, r.y + r.h / 2 + 0.5);
-}
-
-/* ---------------- 培育缸 ---------------- */
-
-function drawNursery(ctx, state, session, c) {
-    var slots = breed.nurserySlotsOf(state);
-    var list = breed.nurseryList(state);
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = '700 11px sans-serif';
-    ctx.fillStyle = TT.textSoft;
-    ctx.fillText('培育缸 ' + list.length + '/' + slots, c.x + 14, c.y + L.BR_NURSERY_LABEL_Y);
-
-    ctx.textAlign = 'right';
-    ctx.font = '600 9.5px sans-serif';
-    ctx.fillStyle = 'rgba(232,212,160,0.42)';
-    ctx.fillText('子代落点 · 点开看词条', c.x + c.w - 14, c.y + L.BR_NURSERY_LABEL_Y);
-
-    for (var i = 0; i < slots; i++) {
-        var r = L.nurseryCellRect(i);
-        var cell = list[i];
-
-        if (!cell) {
-            rr(ctx, r.x, r.y, r.w, r.h, 12);
-            ctx.strokeStyle = 'rgba(200,164,92,0.16)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            continue;
-        }
-
-        Th.card(ctx, r.x, r.y, r.w, r.h, { r: 12, depth: 2 });
-
-        art.drawThumb(ctx, cell.species.id, r.x + 4, r.y + 3, r.w - 8, 42, {
-            t: state.t, phase: i * 1.1
-        });
-
-        /* 性别角标 */
-        var bx = r.x + r.w - 13;
-        var by = r.y + 12;
-        ctx.beginPath();
-        ctx.arc(bx, by, 7, 0, 6.2832);
-        ctx.fillStyle = sexColor(cell.fish.sex);
-        ctx.fill();
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = '700 8.5px sans-serif';
-        ctx.fillStyle = '#fff6ea';
-        ctx.fillText(sexMark(cell.fish.sex), bx, by + 0.5);
-
-        ctx.textAlign = 'center';
-        ctx.font = '700 9.5px sans-serif';
-        ctx.fillStyle = TT.textSoft;
-        ctx.fillText(cell.growth + '% · Σ' + fishLib.traitSumOf(cell.fish), r.x + r.w / 2, r.y + r.h - 20);
-
-        ctx.font = '800 11px sans-serif';
-        ctx.fillStyle = TT.goldLight;
-        ctx.fillText(wallet.format(cell.price), r.x + r.w / 2, r.y + r.h - 7);
-    }
 }
 
 /* ---------------- 选亲本浮层 ---------------- */
@@ -507,121 +472,6 @@ function drawPicker(ctx, state, session) {
     Th.textOutlined(ctx, '取消', b.x + b.w + 5, b.y + b.h / 2, 13, TT.goldLight, '#232c48', 3);
 }
 
-/* ---------------- 子代详情 ---------------- */
-
-function drawDetail(ctx, state, session) {
-    var id = session.nurseryDetail;
-    if (!id) return;
-
-    var list = state.nursery || [];
-    var f = null;
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) f = list[i];
-    if (!f) { session.nurseryDetail = ''; return; }
-
-    var c = L.detailCardRect((f.traits || []).length);
-    var sp = fishLib.speciesById(f.speciesId);
-
-    drawMask(ctx);
-    drawCard(ctx, c);
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = '800 15px sans-serif';
-    ctx.fillStyle = TT.goldLight;
-    ctx.fillText(sp.name, c.x + 16, c.y + 26);
-
-    ctx.font = '800 13px sans-serif';
-    ctx.fillStyle = sexColor(f.sex);
-    ctx.fillText(sexMark(f.sex), c.x + 16 + ctx.measureText(sp.name).width + 40, c.y + 26);
-
-    ctx.font = '600 10px sans-serif';
-    ctx.fillStyle = TT.textSoft;
-    ctx.fillText(sp.rarity + ' · ' + fishLib.stageName(fishLib.stageOf(f.growth)) + ' · 成长 ' +
-        Math.round(f.growth) + '%', c.x + 16, c.y + 46);
-
-    /* 卖价放在第二行右端：第一行右上是关闭按钮，数字放那儿会被盖住 */
-    ctx.textAlign = 'right';
-    ctx.font = '800 12.5px sans-serif';
-    ctx.fillStyle = TT.goldLight;
-    ctx.fillText('卖 ' + wallet.format(fishLib.sellPriceOf(f, state.shellLv)), c.x + c.w - 18, c.y + 47);
-
-    /* 词条列表 */
-    var traits = f.traits || [];
-    ctx.textAlign = 'left';
-    ctx.font = '700 10px sans-serif';
-    ctx.fillStyle = TT.textSoft;
-    ctx.fillText('词条 ' + traits.length + '/' + fishLib.traitSlotsOf(sp), c.x + 16, c.y + 74);
-
-    for (var k = 0; k < traits.length; k++) {
-        var def = fishLib.traitDef(traits[k].id);
-        if (!def) continue;
-        var lv = fishLib.traitLvOf(traits[k]);
-        var ry = c.y + 96 + k * 32;
-
-        rr(ctx, c.x + 16, ry - 11, c.w - 32, 26, 10);
-        ctx.fillStyle = (cfg.traits.lvBg || [])[lv] || 'rgba(200,164,92,0.14)';
-        ctx.fill();
-
-        /* 等级徽章 */
-        rr(ctx, c.x + 22, ry - 8, 30, 20, 8);
-        ctx.fillStyle = (cfg.traits.lvColor || [])[lv] || TT.gold;
-        ctx.globalAlpha = 0.24;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = '800 10.5px sans-serif';
-        ctx.fillStyle = (cfg.traits.lvColor || [])[lv] || TT.gold;
-        ctx.fillText('L' + lv, c.x + 37, ry + 2);
-
-        ctx.textAlign = 'left';
-        ctx.font = '800 11.5px sans-serif';
-        ctx.fillStyle = TT.text;
-        ctx.fillText(def.name, c.x + 58, ry + 2);
-
-        ctx.textAlign = 'right';
-        ctx.font = '600 10.5px sans-serif';
-        ctx.fillStyle = TT.textSoft;
-        ctx.fillText(fishLib.traitText(traits[k]), c.x + c.w - 22, ry + 2);
-    }
-
-    /* 规则说明：放在词条和按钮之间，既不空也顺手教一遍规则 */
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = '600 10px sans-serif';
-    ctx.fillStyle = 'rgba(232,212,160,0.46)';
-    ctx.fillText('子代鱼种跟随雌鱼 · 性别 50/50 · L5 只能靠繁育', c.x + 16, c.y + c.h - 78);
-
-    /* 两个动作 */
-    var b0 = L.pickBtnRect(0, c);
-    var b1 = L.pickBtnRect(1, c);
-
-    Th.jelly(ctx, b0.x, b0.y, b0.w, b0.h, {
-        top: TT.greenTop, bottom: TT.greenBottom, deep: TT.greenDeep,
-        r: 16, depth: 3, ink: '#2f6b45', lw: 2
-    });
-    Th.textOutlined(ctx, '放入鱼缸', b0.x + b0.w / 2, b0.y + b0.h / 2, 13, '#eafff2', '#2f6b45', 3);
-
-    Th.jelly(ctx, b1.x, b1.y, b1.w, b1.h, {
-        top: TT.yellowTop, bottom: TT.yellowBottom, deep: TT.yellowDeep,
-        r: 16, depth: 3, ink: '#5f1e18', lw: 2
-    });
-    Th.textOutlined(ctx, '卖掉 +' + wallet.format(fishLib.sellPriceOf(f, state.shellLv)),
-        b1.x + b1.w / 2, b1.y + b1.h / 2, 12.5, '#fff3d2', '#5f1e18', 3);
-
-    /* 关闭：右上角小 ✕ */
-    var xr = { x: c.x + c.w - 38, y: c.y + 10, w: 28, h: 28 };
-    Th.badge(ctx, xr.x + xr.w / 2, xr.y + xr.h / 2, 14, {
-        top: '#37436a', bottom: '#1f294a', ink: TT.ink, lw: 2
-    });
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = '800 13px sans-serif';
-    ctx.fillStyle = TT.goldLight;
-    ctx.fillText('✕', xr.x + xr.w / 2, xr.y + xr.h / 2);
-}
-
 /* ---------------- 入口 ---------------- */
 
 function draw(ctx, state, session) {
@@ -639,15 +489,20 @@ function draw(ctx, state, session) {
     var chk = breed.canBreed(state, session.breedMother, session.breedFather);
     drawPreview(ctx, state, session, c, chk);
     drawGo(ctx, session, c, chk);
-    drawNursery(ctx, state, session, c);
+
+    /* 底部一行规则提示：把「蛋去哪儿了」说清楚，省得玩家以为蛋丢了 */
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '600 10px sans-serif';
+    ctx.fillStyle = 'rgba(232,212,160,0.46)';
+    ctx.fillText('产出的蛋进仓库鱼卵 · 在仓库点「孵化」才占培育位',
+        c.x + c.w / 2, c.y + L.BR_HINT_Y);
 
     if (session.breedPick) drawPicker(ctx, state, session);
-    if (session.nurseryDetail) drawDetail(ctx, state, session);
 }
 
 module.exports = {
     draw: draw,
-    drawDetailRect: L.pickCardRect,
     /* 仓库「鱼卵」子页也要画同一颗蛋，别在那边再抄一份路径 */
     drawEgg: drawEgg,
     clock: clock

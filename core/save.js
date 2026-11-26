@@ -24,7 +24,7 @@ var LEGACY_V1_KEYS = ['aquarium_game_v1'];
 
 /* ---------------- 序列化 ---------------- */
 
-/* 仓库 / 培育缸里的鱼结构一致：都不存坐标，都由 ensurePlacement 兜底 */
+/* 仓库里的鱼结构一致：不存坐标，放进缸时由 ensurePlacement 兜底 */
 function packFish(f) {
     return {
         id: f.id,
@@ -38,6 +38,27 @@ function packFish(f) {
         ev: f.evo || 0,
         b: f.bornAt || 0
     };
+}
+
+/* 鱼卵：仓库里的（无计时）和培育栏位里的（有计时）共用一套字段 */
+function packEgg(e) {
+    var o = {
+        id: e.id,
+        sp: e.speciesId,
+        sx: e.sex,
+        tr: e.traits || [],
+        mid: e.motherId || '',
+        fid: e.fatherId || '',
+        tw: e.twin ? 1 : 0,
+        sec: e.seconds || 0,
+        bt: e.bornAt || 0
+    };
+    /* 有 hatchAt 才写计时字段：仓库里的蛋不该凭空带一个倒计时 */
+    if (e.hatchAt) {
+        o.st = e.startAt || 0;
+        o.ht = e.hatchAt;
+    }
+    return o;
 }
 
 function serialize(state) {
@@ -71,23 +92,9 @@ function serialize(state) {
         /* 仓库里的鱼还没进缸，不存坐标，放进去时由 ensurePlacement 兜底 */
         caught: (state.caught || []).map(packFish),
 
-        /* M12 繁育：孵化槽只存「结果 + 时间」，不存任何运行时字段 */
-        hatchery: (state.hatchery || []).map(function (h) {
-            return {
-                id: h.id,
-                sp: h.speciesId,
-                sx: h.sex,
-                tr: h.traits || [],
-                mid: h.motherId || '',
-                fid: h.fatherId || '',
-                st: h.startAt || 0,
-                ht: h.hatchAt || 0,
-                sec: h.seconds || 0,
-                tw: h.twin ? 1 : 0
-            };
-        }),
-        nursery: (state.nursery || []).map(packFish),
-        nurseryLv: state.nurseryLv || 1,
+        /* M12 繁育 / M16：eggs = 仓库鱼卵（等玩家孵），hatchery = 培育栏位（在倒数） */
+        eggs: (state.eggs || []).map(packEgg),
+        hatchery: (state.hatchery || []).map(packEgg),
         breedSeq: state.breedSeq || 0,
 
         fish: state.fish.map(function (f) {
@@ -192,40 +199,67 @@ function deserializeV2(raw) {
         }));
     }
 
-    /* M12 繁育：老档没有这些字段，读成空数组/默认值就等于迁移。
+    /* M12 繁育 / M16 改造：老档没有这些字段，读成空数组就等于迁移。
      * 老档里的鱼没有 sx，create 会按 50/50 随机补 —— 不会让老玩家全变公鱼。 */
+    function readEgg(e, timed) {
+        if (!e || !e.id) return null;
+        var egg = {
+            id: e.id,
+            speciesId: e.sp,
+            sex: e.sx === 'm' || e.sx === 'f' ? e.sx : 'f',
+            traits: fishFactory.normalizeTraits(e.tr),
+            motherId: e.mid || '',
+            fatherId: e.fid || '',
+            twin: !!e.tw,
+            seconds: Number(e.sec) || 0,
+            bornAt: Number(e.bt) || 0
+        };
+        if (timed) {
+            egg.startAt = Number(e.st) || 0;
+            egg.hatchAt = Number(e.ht) || 0;
+        }
+        return egg;
+    }
+
+    var eggList = raw.eggs || [];
+    for (var ei = 0; ei < eggList.length; ei++) {
+        var se = readEgg(eggList[ei], true);
+        if (!se) continue;
+        /* 带 hatchAt 的按「正在孵」处理，其余是仓库里等孵的蛋 */
+        if (se.hatchAt) s.hatchery.push(se);
+        else s.eggs.push(se);
+    }
+
     var hatchList = raw.hatchery || [];
     for (var hi = 0; hi < hatchList.length; hi++) {
-        var h = hatchList[hi];
-        if (!h || !h.id) continue;
-        s.hatchery.push({
-            id: h.id,
-            speciesId: h.sp,
-            sex: h.sx === 'm' || h.sx === 'f' ? h.sx : 'f',
-            traits: fishFactory.normalizeTraits(h.tr),
-            motherId: h.mid || '',
-            fatherId: h.fid || '',
-            startAt: Number(h.st) || 0,
-            hatchAt: Number(h.ht) || 0,
-            seconds: Number(h.sec) || 0,
-            twin: !!h.tw
-        });
+        var he = readEgg(hatchList[hi], true);
+        if (!he) continue;
+        /* 老档没有时间字段时给一个完整时长，别读成"立刻孵好" */
+        if (!he.hatchAt) {
+            he.startAt = platform.now();
+            he.hatchAt = he.startAt + (he.seconds || (cfg.breed && cfg.breed.hatchSeconds) || 180) * 1000;
+        }
+        s.hatchery.push(he);
     }
+
+    /* v8 之前繁育出的鱼苗住在「培育缸」里，那个容器已经删了：
+     * 全部并进鱼篓，老玩家不会白丢子代。 */
     var nurseryList = raw.nursery || [];
     for (var ni = 0; ni < nurseryList.length; ni++) {
         var nf = nurseryList[ni];
-        s.nursery.push(fishFactory.create(nf.sp, {
+        if (!nf || !nf.sp) continue;
+        s.caught.push(fishFactory.create(nf.sp, {
             id: nf.id,
             growth: nf.g,
             hunger: nf.h,
             mood: nf.m,
             traits: nf.tr,
             sex: nf.sx,
+            evo: nf.ev || 0,
             bornAt: nf.b
         }));
     }
-    var nurseryMax = Math.max(1, cfg.breed && cfg.breed.openMax || 1);
-    s.nurseryLv = Math.max(1, Math.min(nurseryMax, Math.floor(raw.nurseryLv || 1)));
+
     s.breedSeq = Math.max(0, Math.floor(raw.breedSeq || 0));
 
     return s;

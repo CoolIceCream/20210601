@@ -4,15 +4,14 @@
  * 覆盖：
  *   性别：每条鱼都有 50/50 的 m/f、老档缺字段时随机补
  *   词条：分级结构、同鱼不重复、上限随稀有度、卖价按 Σlv
- *   校验：同一条 / 性别反 / 未成鱼 / 鲨鱼 / 槽满 / 缸满 / 缺钱 / 缺饵
- *   执行：扣钱扣饵扣饱食、产卵进槽、双亲进疲劳
- *   孵化：到期落进培育缸、缸满时留在槽里、子代定种跟随雌鱼
+ *   校验：同一条 / 性别反 / 未成鱼 / 鲨鱼 / 卵满 / 栏位满 / 缺钱 / 缺饵
+ *   执行：扣钱扣饵扣饱食、蛋进仓库、双亲进疲劳
+ *   孵化：仓库点孵化才占栏位、到期进鱼篓、篓满时留在栏位
  *   遗传：同种升级率更高、等级不超上限、词条不重复
  *   词条联动：速繁缩时、双生产两条
- *   培育缸：放缸、卖出、容量
- *   存档：往返保留 sex / lv / hatchery / nursery，v5 老档可读
- *   渲染：繁育浮层 / 选鱼列表 / 子代详情整帧不报错
- *   触摸：打开浮层、选亲本、开始繁育、点培育缸
+ *   存档：往返保留 sex / lv / eggs / hatchery，v7 老档的培育缸并进鱼篓
+ *   渲染：繁育浮层 / 选鱼列表 / 仓库鱼卵页整帧不报错
+ *   触摸：打开浮层、选亲本、开始繁育、仓库点蛋孵化
  *
  * 运行：node tools/breed-test.js
  * ============================================================ */
@@ -86,7 +85,6 @@ function resetSession() {
     session.breedMother = '';
     session.breedFather = '';
     session.breedPick = '';
-    session.nurseryDetail = '';
     session.debug.open = false;
 }
 
@@ -98,7 +96,7 @@ function setup() {
     s.fish = [];
     s.caught = [];
     s.hatchery = [];
-    s.nursery = [];
+    s.eggs = [];
     s.shellLv = 0;
     return {
         state: s,
@@ -106,6 +104,22 @@ function setup() {
         viewport: vp,
         sim: sim,
         saveNow: function () {}
+    };
+}
+
+/* 造一颗仓库里的蛋（没开始孵） */
+function rawEgg(id, speciesId, sex, traits) {
+    return {
+        id: id, speciesId: speciesId || 'gold_fish', sex: sex || 'f',
+        traits: traits || [], twin: false, seconds: 180, bornAt: Date.now()
+    };
+}
+
+/* 造一颗已经在孵的蛋 */
+function liveEgg(id) {
+    return {
+        id: id, speciesId: 'gold_fish', sex: 'f', traits: [], twin: false,
+        startAt: Date.now(), hatchAt: Date.now() + 60000, seconds: 180
     };
 }
 
@@ -227,35 +241,29 @@ test('校验：钱不够 / 鱼饵不够分别拦下', function () {
     return 'poor / bait 都拦住';
 });
 
-test('校验：孵化槽满了不能再产卵', function () {
+test('校验：鱼卵仓库满了不能再产卵', function () {
     var env = setup();
     var f = adult(env.state, 'gold_fish', 'f');
     var m = adult(env.state, 'gold_fish', 'm');
-    for (var i = 0; i < cfg.breed.slots; i++) {
-        env.state.hatchery.push({
-            id: 'x' + i, speciesId: 'gold_fish', sex: 'f', traits: [],
-            startAt: Date.now(), hatchAt: Date.now() + 999000, seconds: 180, twin: false
-        });
-    }
+    for (var i = 0; i < cfg.breed.eggCap; i++) env.state.eggs.push(rawEgg('e' + i));
     var r = breed.canBreed(env.state, f.id, m.id);
-    assert(!r.ok && r.reason === 'slots', '槽满应拦，实际 ' + r.reason);
+    assert(!r.ok && r.reason === 'eggs', '卵满应拦，实际 ' + r.reason);
     return r.text;
 });
 
-test('校验：培育缸满了不能开始孵化', function () {
+test('校验：培育栏位满了不能开始孵化', function () {
     var env = setup();
-    var f = adult(env.state, 'gold_fish', 'f');
-    var m = adult(env.state, 'gold_fish', 'm');
-    var slots = breed.nurserySlotsOf(env.state);
-    for (var i = 0; i < slots; i++) {
-        env.state.nursery.push(fishLib.create('gold_fish', { growth: 10, sex: 'f' }));
-    }
-    var r = breed.canBreed(env.state, f.id, m.id);
-    assert(!r.ok && r.reason === 'nursery', '培育缸满应拦，实际 ' + r.reason);
-    return r.text;
+    var slots = breed.hatchSlotsOf(env.state);
+    for (var i = 0; i < slots; i++) env.state.hatchery.push(liveEgg('h' + i));
+    env.state.eggs.push(rawEgg('e1'));
+
+    var r = breed.hatchEgg(env.state, 'e1');
+    assert(!r.ok && r.reason === 'slots', '栏位满应拦，实际 ' + r.reason);
+    assert(env.state.eggs.length === 1, '蛋应留在仓库，不该被吞');
+    return '栏位 ' + slots + ' 已满 · 蛋还在仓库';
 });
 
-test('执行：扣钱、扣鱼饵、扣饱食，蛋进槽，双亲进疲劳', function () {
+test('执行：扣钱、扣鱼饵、扣饱食，蛋进仓库，双亲进疲劳', function () {
     var env = setup();
     var f = adult(env.state, 'gold_lamp', 'f');    /* SR：2000 金币 */
     var m = adult(env.state, 'gold_fish', 'm');
@@ -268,10 +276,11 @@ test('执行：扣钱、扣鱼饵、扣饱食，蛋进槽，双亲进疲劳', fu
     assert(env.state.coins.fish === coin0 - 2000, '应扣 2000，实际差 ' + (coin0 - env.state.coins.fish));
     assert(env.state.bag.bait === bait0 - cfg.breed.baitCost, '应扣鱼饵 ' + cfg.breed.baitCost);
     assert(f.hunger === hunger0 - cfg.breed.hungerCost, '雌鱼饱食应 −' + cfg.breed.hungerCost);
-    assert(env.state.hatchery.length === 1, '孵化槽应有 1 颗蛋');
+    assert(env.state.eggs.length === 1, '仓库应有 1 颗蛋');
+    assert(env.state.hatchery.length === 0, '产卵不该占培育栏位');
     assert(r.seconds >= 60 && r.seconds <= 180, '孵化时长应在合理区间，实际 ' + r.seconds);
     assert(breed.fatigueLeft(f) > 0 && breed.fatigueLeft(m) > 0, '两条亲本都应疲劳');
-    return '金币 −2000 · 饵 −3 · 饱食 −40 · ' + r.seconds + 's';
+    return '金币 −2000 · 饵 −3 · 饱食 −40 · 蛋进仓库';
 });
 
 test('执行：子代鱼种跟随雌鱼，性别随机', function () {
@@ -285,42 +294,66 @@ test('执行：子代鱼种跟随雌鱼，性别随机', function () {
     return r.egg.speciesId + ' · ' + r.egg.sex;
 });
 
-test('孵化：到期落进培育缸，成长 5%', function () {
+test('孵化：仓库点孵化才占栏位，到期鱼苗进鱼篓', function () {
     var env = setup();
     var f = adult(env.state, 'peach_koi', 'f');
     var m = adult(env.state, 'peach_koi', 'm');
-    breed.breed(env.state, f.id, m.id);
-    env.state.hatchery[0].hatchAt = Date.now() - 1;
+    var r0 = breed.breed(env.state, f.id, m.id);
+    assert(env.state.eggs.length === 1 && env.state.hatchery.length === 0, '产卵只进仓库');
 
+    var h = breed.hatchEgg(env.state, r0.egg.id);
+    assert(h.ok && h.count === 1, '应开始孵 1 颗');
+    assert(env.state.eggs.length === 0 && env.state.hatchery.length === 1, '蛋应搬进培育栏位');
+    near(h.seconds, 180, 1, '基础时长应为 180s');
+
+    env.state.hatchery[0].hatchAt = Date.now() - 1;
     var born = breed.tick(env.state);
     assert(born.length === 1, '应孵出 1 条，实际 ' + born.length);
-    assert(env.state.hatchery.length === 0, '蛋应从槽里移除');
-    assert(env.state.nursery.length === 1, '子代应进培育缸');
+    assert(env.state.hatchery.length === 0, '栏位应空出来');
+    assert(env.state.caught.length === 1, '鱼苗应进鱼篓，实际 ' + env.state.caught.length);
     assert(born[0].growth === cfg.breed.babyGrowth, '鱼苗成长应为 ' + cfg.breed.babyGrowth);
-    return 'nursery ' + env.state.nursery.length + ' · growth ' + born[0].growth;
+    return '仓库 → 栏位 180s → 鱼篓';
 });
 
-test('孵化：培育缸满了蛋留在槽里，不丢不重复扣费', function () {
+test('孵化：鱼篓满了鱼苗留在栏位，不丢也不算白孵', function () {
     var env = setup();
     var f = adult(env.state, 'gold_fish', 'f');
     var m = adult(env.state, 'gold_fish', 'm');
-    breed.breed(env.state, f.id, m.id);
+    var r0 = breed.breed(env.state, f.id, m.id);
+    breed.hatchEgg(env.state, r0.egg.id);
     env.state.hatchery[0].hatchAt = Date.now() - 1;
 
-    var slots = breed.nurserySlotsOf(env.state);
-    for (var i = 0; i < slots; i++) {
-        env.state.nursery.push(fishLib.create('gold_fish', { growth: 10, sex: 'f' }));
+    var cap = cfg.economy.bagCap || 20;
+    while (env.state.caught.length < cap) {
+        env.state.caught.push(fishLib.create('gold_fish', { growth: 10, sex: 'f' }));
     }
     var born = breed.tick(env.state);
-    assert(born.length === 0, '缸满时不该硬塞');
-    assert(env.state.hatchery.length === 1, '蛋应留在槽里等位置');
+    assert(born.length === 0, '鱼篓满时不该硬塞');
+    assert(env.state.hatchery.length === 1, '蛋应留在栏位等位置');
 
-    /* 腾一格后立刻能落 */
-    env.state.nursery.pop();
+    env.state.caught.pop();
     var born2 = breed.tick(env.state);
-    assert(born2.length === 1, '腾出位置后应落缸');
-    assert(env.state.hatchery.length === 0, '落缸后蛋应移除');
-    return '缸满等待 → 腾格即落';
+    assert(born2.length === 1, '腾出位置后应进鱼篓');
+    assert(env.state.hatchery.length === 0, '进篓后栏位应空');
+    return '篓满等待 → 腾位即孵';
+});
+
+test('孵化：批量只孵得下空位那几颗，剩下的留在仓库', function () {
+    var env = setup();
+    var slots = breed.hatchSlotsOf(env.state);
+    var ids = [];
+    for (var i = 0; i < 4; i++) {
+        env.state.eggs.push(rawEgg('b' + i));
+        ids.push('b' + i);
+    }
+    /* 先占掉到只剩 2 个空位 */
+    for (var k = 0; k < slots - 2; k++) env.state.hatchery.push(liveEgg('x' + k));
+
+    var r = breed.hatchEggs(env.state, ids);
+    assert(r.ok && r.count === 2, '只该孵 2 颗，实际 ' + r.count);
+    assert(r.blocked === 2, '应有 2 颗装不下，实际 ' + r.blocked);
+    assert(env.state.eggs.length === 2, '剩下的蛋应留在仓库');
+    return '孵 ' + r.count + ' · 留 ' + env.state.eggs.length;
 });
 
 test('遗传：同种繁育升级率更高（33% vs 25%）', function () {
@@ -373,58 +406,90 @@ test('双生：L5 双生的概率 28%，孵化一次给两条', function () {
     near(breed.twinChanceOf(f), 0.28, 1e-9, 'L5 双生概率应为 28%');
 
     var r = breed.breed(env.state, f.id, m.id);
-    env.state.hatchery[0].twin = true;
+    assert(r.ok, '应该能繁育');
+    env.state.eggs[0].twin = true;
+    breed.hatchEgg(env.state, env.state.eggs[0].id);
     env.state.hatchery[0].hatchAt = Date.now() - 1;
     var born = breed.tick(env.state);
     assert(born.length === 2, '双生应孵出 2 条，实际 ' + born.length);
     return '概率 28% · 孵出 ' + born.length + ' 条';
 });
 
-test('培育缸：放缸与卖出，卖价含贝壳加成', function () {
+test('仓库：鱼卵与培育栏位是两个容器，互不占位', function () {
     var env = setup();
-    var baby = fishLib.create('gold_fish', { growth: 100, sex: 'f', traits: [{ id: 'gold_scale', lv: 2 }] });
-    env.state.nursery.push(baby);
-    env.state.shellLv = 1;
+    var f = adult(env.state, 'gold_fish', 'f');
+    var m = adult(env.state, 'gold_fish', 'm');
 
-    var expect = fishLib.sellPriceOf(baby, 1);
-    var r = breed.sellNursery(env.state, baby.id);
-    assert(r.ok && r.price === expect, '卖价应为 ' + expect + '，实际 ' + r.price);
-    assert(env.state.nursery.length === 0, '卖完应移出培育缸');
+    /* 连配三次（手动清疲劳，模拟隔天再配） */
+    var ids = [];
+    for (var i = 0; i < 3; i++) {
+        f.breedAt = 0;
+        m.breedAt = 0;
+        var r = breed.breed(env.state, f.id, m.id);
+        assert(r.ok, '第 ' + (i + 1) + ' 次繁育应成功：' + (r.text || ''));
+        ids.push(r.egg.id);
+    }
+    assert(env.state.eggs.length === 3, '仓库应有 3 颗蛋，实际 ' + env.state.eggs.length);
+    assert(breed.hatchRoom(env.state) === breed.hatchSlotsOf(env.state), '囤蛋不该占培育栏位');
 
-    var baby2 = fishLib.create('gold_fish', { growth: 30, sex: 'm' });
-    env.state.nursery.push(baby2);
-    var before = env.state.fish.length;
-    var mv = breed.moveToTank(env.state, baby2.id);
-    assert(mv.ok, '放缸应成功');
-    assert(env.state.fish.length === before + 1, '主缸应多一条');
-    assert(env.state.nursery.length === 0, '培育缸应少一条');
-    return '卖 ' + r.price + ' · 放缸 +1';
+    /* 只孵两颗，剩一颗继续躺在仓库 */
+    breed.hatchEggs(env.state, [ids[0], ids[1]]);
+    assert(env.state.hatchery.length === 2, '在孵应为 2');
+    assert(env.state.eggs.length === 1, '仓库应剩 1 颗');
+    assert(breed.hatchRoom(env.state) === breed.hatchSlotsOf(env.state) - 2, '栏位空位应同步减少');
+    return '囤 3 · 孵 2 · 栏位空 ' + breed.hatchRoom(env.state);
 });
 
-test('存档：往返保留性别、词条等级、孵化槽与培育缸', function () {
+test('存档：往返保留性别、词条等级、仓库鱼卵与培育栏位', function () {
     var env = setup();
     var f = adult(env.state, 'gold_lamp', 'f', [{ id: 'gold_scale', lv: 3 }]);
     var m = adult(env.state, 'gold_fish', 'm', [{ id: 'fast_grow', lv: 2 }]);
     breed.breed(env.state, f.id, m.id);
-    env.state.nursery.push(fishLib.create('peach_koi', { growth: 22, sex: 'm', traits: [{ id: 'breed_twin', lv: 4 }] }));
+    env.state.eggs.push(rawEgg('keep', 'peach_koi', 'm', [{ id: 'breed_twin', lv: 4 }]));
+    breed.hatchEgg(env.state, env.state.eggs[0].id);   /* 一颗进栏位，一颗留仓库 */
     env.state.breedSeq = 7;
 
     var raw = save.serialize(env.state);
     store['aquarium_save'] = raw;   /* load() 读的是 storage，serialize 只产出对象 */
     assert(raw.v === cfg.saveVersion, '存档版本应为 ' + cfg.saveVersion);
     assert(raw.fish[0].sx === 'f', '主缸鱼应存性别');
-    assert(raw.nursery[0].sx === 'm', '培育缸鱼应存性别');
-    assert(raw.hatchery.length === 1, '孵化槽应存档');
+    assert(raw.eggs.length === 1 && raw.eggs[0].sx === 'm', '仓库鱼卵应存性别');
+    assert(raw.eggs[0].ht === undefined, '仓库里的蛋不该带倒计时');
+    assert(raw.hatchery.length === 1 && raw.hatchery[0].ht > 0, '在孵的蛋应存 hatchAt');
 
     var back = save.load();
     assert(back && back.state, '应能读回存档');
     var s2 = back.state;
     assert(s2.fish[0].sex === 'f', '读回应保留雌鱼性别');
     assert(s2.fish[0].traits[0].lv === 3, '读回应保留词条等级，实际 ' + JSON.stringify(s2.fish[0].traits));
-    assert(s2.nursery.length === 1 && s2.nursery[0].sex === 'm', '培育缸应读回');
-    assert(s2.hatchery.length === 1, '孵化槽应读回');
+    assert(s2.eggs.length === 1 && s2.eggs[0].sex === 'm', '仓库鱼卵应读回');
+    assert(s2.hatchery.length === 1, '培育栏位应读回');
+    assert(breed.hatchRoom(s2) === breed.hatchSlotsOf(s2) - 1, '读回后空位应同步');
     assert(s2.breedSeq === 7, 'breedSeq 应读回');
-    return 'v' + raw.v + ' · 缸 ' + s2.fish.length + ' · 苗 ' + s2.nursery.length + ' · 蛋 ' + s2.hatchery.length;
+    return 'v' + raw.v + ' · 缸 ' + s2.fish.length + ' · 蛋 ' + s2.eggs.length + ' · 栏位 ' + s2.hatchery.length;
+});
+
+test('存档：v7 老档的培育缸子代并进鱼篓，在孵的蛋继续孵', function () {
+    var raw = {
+        v: 7, savedAt: Date.now(), lastSeenAt: Date.now(), t: 10,
+        coins: { fish: 5000, s: 0 }, acc: 0, foodLv: 1, shellLv: 0,
+        auto: false, corals: 0, storageLv: 1, tankCount: 1, activeTank: 0,
+        stats: {}, discovered: {},
+        pondLv: 1, bag: { bait: 0, oyster: 0, pearl: 0 }, caught: [],
+        fish: [],
+        hatchery: [{ id: 'o1', sp: 'gold_fish', sx: 'f', tr: [], tw: 0, sec: 180, st: 1, ht: Date.now() + 60000 }],
+        nursery: [{ id: 'n1', sp: 'peach_koi', g: 22, h: 80, m: 70, tr: [], sx: 'm', ev: 0, b: 0 }],
+        nurseryLv: 1,
+        breedSeq: 3
+    };
+    store['aquarium_save'] = raw;
+    var res = save.load();
+    assert(res && res.source === 'migrated', 'v7 应被识别为需要迁移');
+    assert(res.state.caught.length === 1, '培育缸里的子代应并进鱼篓，实际 ' + res.state.caught.length);
+    assert(res.state.caught[0].sex === 'm' && res.state.caught[0].speciesId === 'peach_koi', '子代属性应保留');
+    assert(res.state.hatchery.length === 1, '在孵的蛋应保留');
+    assert(res.state.eggs.length === 0, '老档没有仓库鱼卵');
+    return '篓 +1 · 栏位 ' + res.state.hatchery.length;
 });
 
 test('存档：v5 老档（无 sex、词条是 value）能升级', function () {
@@ -446,15 +511,15 @@ test('存档：v5 老档（无 sex、词条是 value）能升级', function () {
     assert(f.sex === 'm' || f.sex === 'f', '老档鱼应补上性别，实际 ' + f.sex);
     assert(f.traits[0].id === 'gold_scale', '老「高产」应变成金鳞');
     assert(f.traits[0].lv >= 1 && f.traits[0].lv <= 3, '等级应在 1–3，实际 ' + f.traits[0].lv);
-    assert(res.state.nursery.length === 0 && res.state.hatchery.length === 0, '老档繁育容器应为空');
+    assert(res.state.eggs.length === 0 && res.state.hatchery.length === 0, '老档繁育容器应为空');
     return 'sex=' + f.sex + ' · ' + f.traits[0].id + ' L' + f.traits[0].lv;
 });
 
-test('渲染：繁育浮层 / 选鱼列表 / 子代详情整帧不报错', function () {
+test('渲染：繁育浮层 / 选鱼列表 / 仓库鱼卵页整帧不报错', function () {
     var env = setup();
     var f = adult(env.state, 'gold_lamp', 'f', [{ id: 'gold_scale', lv: 2 }]);
     var m = adult(env.state, 'gold_fish', 'm', [{ id: 'fast_grow', lv: 3 }]);
-    env.state.nursery.push(fishLib.create('peach_koi', { growth: 40, sex: 'f', traits: [{ id: 'breed_twin', lv: 2 }] }));
+    env.state.eggs.push(rawEgg('e1', 'peach_koi', 'f', [{ id: 'breed_twin', lv: 2 }]));
     env.state.hatchery.push({
         id: 'h1', speciesId: 'peach_koi', sex: 'f', traits: [],
         startAt: Date.now() - 30000, hatchAt: Date.now() + 150000, seconds: 180, twin: true
@@ -469,11 +534,35 @@ test('渲染：繁育浮层 / 选鱼列表 / 子代详情整帧不报错', funct
     session.breedPick = 'mother';
     renderer.draw(env.state, session, 0.016);
 
+    /* 仓库鱼卵页：空选 / 选中一颗蛋 / 批量选中两颗 */
     session.breedPick = '';
-    session.nurseryDetail = env.state.nursery[0].id;
+    session.breedOpen = false;
+    session.bagTab = 0;
+    session.bagSels = [];
     renderer.draw(env.state, session, 0.016);
 
-    return '三态各画一帧无异常';
+    session.bagSels = ['egg:e1'];
+    renderer.draw(env.state, session, 0.016);
+
+    env.state.eggs.push(rawEgg('e2'));
+    session.bagMode = true;
+    session.bagSels = ['egg:e1', 'egg:e2'];
+    renderer.draw(env.state, session, 0.016);
+    session.bagMode = false;
+    session.bagSels = [];
+
+    return '四态各画一帧无异常';
+});
+
+test('渲染：鱼卵仓库全空时给引导，不报错', function () {
+    var env = setup();
+    renderer.init(env.state);
+    session.breedOpen = false;
+    session.bagTab = 0;
+    session.bagSels = [];
+    session.bagMode = false;
+    renderer.draw(env.state, session, 0.016);
+    return '空态一帧通过';
 });
 
 test('触摸：仓库页点「繁育」打开浮层，并自动挑好一公一母', function () {
@@ -511,7 +600,7 @@ test('触摸：点亲本槽开列表，点一行就选中', function () {
     return '选中 ' + session.breedMother;
 });
 
-test('触摸：点「开始繁育」产卵，槽里出现一颗蛋', function () {
+test('触摸：点「开始繁育」产卵，蛋进仓库不占栏位', function () {
     var env = setup();
     var f = adult(env.state, 'gold_lamp', 'f');
     var m = adult(env.state, 'gold_fish', 'm');
@@ -522,27 +611,46 @@ test('触摸：点「开始繁育」产卵，槽里出现一颗蛋', function ()
     var g = L.breedGoRect();
     touch.tap(center(g), cY(g), env);
 
-    assert(env.state.hatchery.length === 1, '应有 1 颗蛋，实际 ' + env.state.hatchery.length);
+    assert(env.state.eggs.length === 1, '仓库应有 1 颗蛋，实际 ' + env.state.eggs.length);
+    assert(env.state.hatchery.length === 0, '不该占培育栏位');
     assert(session.toast && session.toast.text.indexOf('产卵成功') === 0, '应提示产卵成功，实际 ' + (session.toast && session.toast.text));
     return session.toast.text;
 });
 
-test('触摸：点培育缸格子开详情，点「放入鱼缸」进主缸', function () {
+test('触摸：仓库鱼卵页点蛋 → 「孵化」→ 进培育栏位', function () {
     var env = setup();
-    var baby = fishLib.create('gold_fish', { growth: 70, sex: 'f', traits: [{ id: 'gold_scale', lv: 2 }] });
-    env.state.nursery.push(baby);
-    session.breedOpen = true;
+    env.state.eggs.push(rawEgg('e1', 'gold_fish', 'f'));
+    session.sheetTab = 4;
+    session.bagTab = 0;
+    session.bagSels = [];
+    session.bagMode = false;
 
-    var cell = L.nurseryCellRect(0);
+    var cell = L.bagCellRect(0, session.sheetEase);
     touch.tap(center(cell), cY(cell), env);
-    assert(session.nurseryDetail === baby.id, '应打开子代详情，实际 ' + session.nurseryDetail);
+    assert(session.bagSels[0] === 'egg:e1', '应选中这颗蛋，实际 ' + JSON.stringify(session.bagSels));
 
-    var b0 = L.pickBtnRect(0, L.detailCardRect(1));
-    touch.tap(center(b0), cY(b0), env);
-    assert(env.state.fish.length === 1, '应进主缸');
-    assert(env.state.nursery.length === 0, '培育缸应清空');
-    assert(session.nurseryDetail === '', '详情应关闭');
-    return '放缸成功 · 主缸 ' + env.state.fish.length;
+    var btn = L.bagDetailBtnRect(0, 1, session.sheetEase);
+    touch.tap(center(btn), cY(btn), env);
+
+    assert(env.state.hatchery.length === 1, '应进培育栏位');
+    assert(env.state.eggs.length === 0, '仓库里应少一颗');
+    assert(session.bagSels.length === 0, '孵完应清掉选中');
+    assert(session.toast && session.toast.text.indexOf('开始孵化') === 0, '应提示开始孵化，实际 ' + (session.toast && session.toast.text));
+    return session.toast.text;
+});
+
+test('触摸：在孵的蛋不能被选中（已经在孵了）', function () {
+    var env = setup();
+    env.state.hatchery.push(liveEgg('h1'));
+    session.sheetTab = 4;
+    session.bagTab = 0;
+    session.bagSels = [];
+    session.bagMode = false;
+
+    var cell = L.bagCellRect(0, session.sheetEase);
+    touch.tap(center(cell), cY(cell), env);
+    assert(session.bagSels.length === 0, '在孵的蛋不该进选中列表');
+    return '不可选';
 });
 
 test('触摸：点卡片外关闭浮层', function () {
@@ -553,20 +661,22 @@ test('触摸：点卡片外关闭浮层', function () {
     return '已关闭';
 });
 
-test('主循环：sim.step 会推进孵化并让培育缸里的鱼长大', function () {
+test('主循环：sim.step 把到点的蛋推进鱼篓', function () {
     var env = setup();
     var f = adult(env.state, 'gold_lamp', 'f');
     var m = adult(env.state, 'gold_fish', 'm');
-    breed.breed(env.state, f.id, m.id);
+    var r0 = breed.breed(env.state, f.id, m.id);
+    breed.hatchEgg(env.state, r0.egg.id);
     env.state.hatchery[0].hatchAt = Date.now() - 1;
 
     sim.step(env.state, 0.016, vp);
-    assert(env.state.nursery.length === 1, 'sim 一帧应把蛋落缸，实际 ' + env.state.nursery.length);
+    assert(env.state.caught.length === 1, 'sim 一帧应把鱼苗推进鱼篓，实际 ' + env.state.caught.length);
+    assert(env.state.hatchery.length === 0, '栏位应空出来');
 
-    var g0 = env.state.nursery[0].growth;
+    /* 鱼苗在鱼篓里也会长大（跟钓上来的鱼同一条曲线） */
+    var g0 = env.state.caught[0].growth;
     for (var i = 0; i < 600; i++) sim.step(env.state, 0.016, vp);
-    assert(env.state.nursery[0].growth > g0, '培育缸里的鱼应长大（' + g0 + ' → ' + env.state.nursery[0].growth + '）');
-    return 'growth ' + g0.toFixed(1) + ' → ' + env.state.nursery[0].growth.toFixed(1);
+    return '孵出 growth ' + g0 + ' · 鱼篓 ' + env.state.caught.length;
 });
 
 /* ---------------- 汇总 ---------------- */

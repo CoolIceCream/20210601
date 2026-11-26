@@ -22,7 +22,6 @@ module.exports = {
     breedMother: '',    /* 选中的雌鱼 id */
     breedFather: '',    /* 选中的雄鱼 id */
     breedPick: '',      /* 正在选亲本的槽：'mother' / 'father' / '' */
-    nurseryDetail: '',  /* 培育缸里点开的子代 id（详情小卡） */
 
     /* 模态弹窗：{ type:'offline', seconds, gain, capped } */
     modal: null,

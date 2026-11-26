@@ -515,13 +515,12 @@ function step(state, dt, vp) {
     }
     predation.removeEaten(state);
 
-    /* M12 繁育：到点的蛋落进培育缸，子代在培育缸里按同一条成长曲线长大。
-     * 培育缸满了就留在孵化槽里等位置，不会凭空消失。 */
+    /* M12 繁育 / M16：到点的蛋直接进鱼篓，不再是"落培育缸"。
+     * 鱼篓满了就留在培育栏位里等位置，不会凭空消失。 */
     var bornNow = breed.tick(state);
     for (var bi = 0; bi < bornNow.length; bi++) {
         addFloat(state, vp.w / 2, vp.h * 0.34, '孵化完成', '#a8e0c4');
     }
-    breed.growNursery(state, dt);
 
     var maxX = vp.w + 60;
     state.foods = state.foods.filter(function (x) {

@@ -425,10 +425,10 @@ function sysBtnRect(k) {
  * 不进页签（页签已经 5 个、宽度见底），做成盖在仓库页上的全屏卡片。
  * 入口是仓库页标题行右侧的「繁育」小按钮。
  *
- * 卡内从上到下：孵化槽 ×3 → 亲本槽 ×2 → 消耗预览 → 繁育按钮 → 培育缸 6 格。
+ * 卡内从上到下：培育栏位 ×6 → 亲本槽 ×2 → 消耗预览 → 繁育按钮 → 一行提示。
  * 所有纵坐标都相对卡片顶部，卡片整体居中，小屏也不会顶到刘海。 */
 var BREED_CARD_W = Math.min(W - 24, 366);
-var BREED_CARD_H = Math.min(H * 0.9, 566);
+var BREED_CARD_H = Math.min(H * 0.9, 432);
 
 function breedCardRect() {
     var h = BREED_CARD_H;
@@ -442,25 +442,34 @@ function breedCloseRect() {
     return { x: c.x + c.w - 40, y: c.y + 10, w: 30, h: 30 };
 }
 
-/* 卡内纵坐标（相对卡片顶部） */
-var BR_HATCH_Y = 58;
-var BR_HATCH_H = 62;
-var BR_PARENT_Y = 128;
+/* 卡内纵坐标（相对卡片顶部）
+ * M16：删掉「培育缸」，原来那条 3 格的孵化槽扩成 6 个「培育栏位」（3×2），
+ * 卡片也从 566 缩到 432 —— 少了 6 格培育缸，不需要那么高了。 */
+var BR_SLOT_LABEL_Y = 46;
+var BR_SLOT_Y = 58;
+var BR_SLOT_H = 68;
+var BR_SLOT_GAP = 8;
+var BR_PARENT_Y = 212;
 var BR_PARENT_H = 92;
-var BR_PREVIEW_Y = 228;
+var BR_PREVIEW_Y = 316;
 var BR_PREVIEW_H = 36;
-var BR_GO_Y = 272;
-var BR_GO_H = 48;
-var BR_NURSERY_LABEL_Y = 340;
-var BR_NURSERY_Y = 352;
-var BR_CELL_H = 74;
-var BR_CELL_GAP = 8;
+var BR_GO_Y = 358;
+var BR_GO_H = 46;
+var BR_HINT_Y = 418;
 
 function hatchSlotRect(i) {
     var c = breedCardRect();
-    var gap = 8;
+    var cols = 3;
+    var gap = BR_SLOT_GAP;
     var cw = (c.w - 24 - gap * 2) / 3;
-    return { x: c.x + 12 + i * (cw + gap), y: c.y + BR_HATCH_Y, w: cw, h: BR_HATCH_H };
+    var col = i % cols;
+    var row = Math.floor(i / cols);
+    return {
+        x: c.x + 12 + col * (cw + gap),
+        y: c.y + BR_SLOT_Y + row * (BR_SLOT_H + gap),
+        w: cw,
+        h: BR_SLOT_H
+    };
 }
 
 function breedParentRect(k) {
@@ -480,21 +489,6 @@ function breedGoRect() {
     return { x: c.x + 12, y: c.y + BR_GO_Y, w: c.w - 24, h: BR_GO_H };
 }
 
-function nurseryCellRect(i) {
-    var c = breedCardRect();
-    var cols = 3;
-    var gap = 8;
-    var cw = (c.w - 24 - gap * 2) / 3;
-    var col = i % cols;
-    var row = Math.floor(i / cols);
-    return {
-        x: c.x + 12 + col * (cw + gap),
-        y: c.y + BR_NURSERY_Y + row * (BR_CELL_H + BR_CELL_GAP),
-        w: cw,
-        h: BR_CELL_H
-    };
-}
-
 /* 动作按钮：默认贴在「选鱼卡」底部，也可以传入别的卡片矩形复用 */
 function pickBtnRect(k, card) {
     var c = card || pickCardRect();
@@ -512,16 +506,7 @@ function pickCardRect(n) {
     return { x: c.x + 10, y: c.y + (c.h - h) / 2, w: c.w - 20, h: h };
 }
 
-/* 子代详情卡：高度按词条数走（1 条 / 2 条） */
-function detailCardRect(traitCount) {
-    var c = breedCardRect();
-    var t = Math.max(1, Math.min(2, traitCount == null ? 2 : traitCount));
-    var h = Math.min(c.h - 40, 196 + t * 32);
-    return { x: c.x + 10, y: c.y + (c.h - h) / 2, w: c.w - 20, h: h };
-}
-
-function pickRowRect(i) {
-    var c = pickCardRect();
+function pickRowRect(i) {    var c = pickCardRect();
     return { x: c.x + 10, y: c.y + 46 + i * 52, w: c.w - 20, h: 46 };
 }
 
@@ -644,19 +629,17 @@ module.exports = {
     /* M12 繁育 */
     BREED_CARD_W: BREED_CARD_W,
     BREED_CARD_H: BREED_CARD_H,
-    BR_HATCH_Y: BR_HATCH_Y,
-    BR_HATCH_H: BR_HATCH_H,
-    BR_NURSERY_LABEL_Y: BR_NURSERY_LABEL_Y,
-    BR_NURSERY_Y: BR_NURSERY_Y,
+    BR_SLOT_LABEL_Y: BR_SLOT_LABEL_Y,
+    BR_SLOT_Y: BR_SLOT_Y,
+    BR_SLOT_H: BR_SLOT_H,
+    BR_HINT_Y: BR_HINT_Y,
     breedCardRect: breedCardRect,
     breedCloseRect: breedCloseRect,
     hatchSlotRect: hatchSlotRect,
     breedParentRect: breedParentRect,
     breedPreviewRect: breedPreviewRect,
     breedGoRect: breedGoRect,
-    nurseryCellRect: nurseryCellRect,
     pickCardRect: pickCardRect,
-    detailCardRect: detailCardRect,
     pickRowRect: pickRowRect,
     pickBtnRect: pickBtnRect,
     bagBreedRect: bagBreedRect,

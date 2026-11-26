@@ -91,7 +91,7 @@ function setup() {
     s.fish = [];
     s.caught = [];
     s.hatchery = [];
-    s.nursery = [];
+    s.eggs = [];
     s.shellLv = 0;
     s.view.selFish = '';
     return { state: s, session: session, viewport: vp, sim: sim, saveNow: noop };

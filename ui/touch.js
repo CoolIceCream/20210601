@@ -354,6 +354,27 @@ function runBagAction(env, key) {
         return;
     }
 
+    /* 仓库鱼卵 → 培育栏位：这才是"开始孵化"的那一下。
+     * 格子 key 是 'egg:<id>'，孵化用的是纯 id，前缀在这里剥掉。 */
+    if (key === 'hatch' || key === 'hatchMany') {
+        var ids = [];
+        for (var si = 0; si < session.bagSels.length; si++) {
+            var k = session.bagSels[si];
+            if (k.indexOf('egg:') === 0) ids.push(k.slice(4));
+        }
+        var hr = breedCore.hatchEggs(state, ids);
+        if (!hr.ok) {
+            session.showToast(hr.reason === 'slots' ? '培育位满了 · 等一颗孵出来' : '这颗蛋已经不在了');
+            return;
+        }
+        session.bagSels = [];
+        var hmsg = '开始孵化 ' + hr.count + ' 颗 · ' + hr.seconds + ' 秒';
+        if (hr.blocked > 0) hmsg += ' · ' + hr.blocked + ' 颗装不下';
+        session.showToast(hmsg);
+        if (env.saveNow) env.saveNow();
+        return;
+    }
+
     if (key === 'break') {
         var br = pondCore.breakOyster(state);
         if (!br.ok) session.showToast('没有珍珠贝');
@@ -454,7 +475,9 @@ function handleBag(x, y, env) {
     for (var a = 0; a < actions.length; a++) {
         if (!U.inRect(x, y, L.bagDetailBtnRect(a, actions.length, ease))) continue;
         if (actions[a].on) runBagAction(env, actions[a].key);
-        else if (actions[a].key === 'tank' || actions[a].key === 'tankMany') {
+        else if (actions[a].key === 'hatch' || actions[a].key === 'hatchMany') {
+            session.showToast('培育位满了 · 等一颗孵出来再孵');
+        } else if (actions[a].key === 'tank' || actions[a].key === 'tankMany') {
             session.showToast('鱼缸满了，先升仓库等级');
         }
         return;
@@ -470,7 +493,8 @@ function handleBag(x, y, env) {
     for (var i = 0; i < maxShow; i++) {
         if (!U.inRect(x, y, L.bagCellRect(i, ease))) continue;
         var c = cells[i];
-        if (c.kind === 'empty') return;
+        /* 空格子没得点；在孵的蛋已经在孵了，选中它也没有按钮可给 */
+        if (c.kind === 'empty' || c.kind === 'incubating') return;
 
         var at = session.bagSels.indexOf(c.key);
         if (session.bagMode) {
@@ -515,7 +539,6 @@ function openBreed(env) {
 
     session.breedOpen = true;
     session.breedPick = '';
-    session.nurseryDetail = '';
 
     var cands = breedCore.candidatesOf(state);
     var i;
@@ -535,46 +558,7 @@ function handleBreed(x, y, env) {
     var session = env.session;
     var state = env.state;
 
-    /* 最上层：子代详情（卡片高度跟着词条数走，命中区必须同源） */
-    if (session.nurseryDetail) {
-        var dFish = breedCore.findFish(state, session.nurseryDetail);
-        if (!dFish) {
-            for (var di = 0; di < (state.nursery || []).length; di++) {
-                if (state.nursery[di].id === session.nurseryDetail) dFish = state.nursery[di];
-            }
-        }
-        var dc = L.detailCardRect(dFish ? (dFish.traits || []).length : 1);
-        var xr = { x: dc.x + dc.w - 38, y: dc.y + 10, w: 28, h: 28 };
-
-        if (U.inRect(x, y, xr)) {
-            session.nurseryDetail = '';
-            return;
-        }
-        if (U.inRect(x, y, L.pickBtnRect(0, dc))) {
-            var mv = breedCore.moveToTank(state, session.nurseryDetail);
-            if (!mv.ok) session.showToast(mv.reason === 'full' ? '鱼缸满了，先清出鱼位' : '这条子代已经不在了');
-            else {
-                session.nurseryDetail = '';
-                session.showToast('已放进鱼缸');
-                if (env.saveNow) env.saveNow();
-            }
-            return;
-        }
-        if (U.inRect(x, y, L.pickBtnRect(1, dc))) {
-            var sc = breedCore.sellNursery(state, session.nurseryDetail);
-            if (!sc.ok) session.showToast('这条子代已经不在了');
-            else {
-                session.nurseryDetail = '';
-                session.showToast('卖掉 ' + sc.name + ' +' + wallet.format(sc.price));
-                if (env.saveNow) env.saveNow();
-            }
-            return;
-        }
-        if (!U.inRect(x, y, dc)) session.nurseryDetail = '';
-        return;
-    }
-
-    /* 次上层：选亲本列表 */
+    /* 最上层：选亲本列表 */
     if (session.breedPick) {
         var want = session.breedPick === 'mother' ? 'f' : 'm';
         var otherId = session.breedPick === 'mother' ? session.breedFather : session.breedMother;
@@ -625,31 +609,21 @@ function handleBreed(x, y, env) {
         if (!r.ok) {
             session.showToast(r.text || '还不能繁育');
         } else {
-            session.showToast('产卵成功 · ' + r.seconds + ' 秒后孵化' + (r.twin ? ' · 双生！' : ''));
+            session.showToast('产卵成功 · 已放进仓库鱼卵' + (r.twin ? ' · 双生！' : ''));
             if (env.saveNow) env.saveNow();
         }
         return;
     }
 
-    /* 孵化槽：只做提示，真正的落缸在 sim 每帧的 tick 里 */
-    var total = cfg.breed.slots || 3;
+    /* 培育栏位：只做提示，真正的落篓在 sim 每帧的 tick 里 */
+    var total = breedCore.hatchSlotsOf(state);
     for (var h = 0; h < total; h++) {
         if (!U.inRect(x, y, L.hatchSlotRect(h))) continue;
         var eggs = breedCore.hatchList(state);
         var e = eggs[h];
-        if (!e) session.showToast('空槽 · 选好亲本就能产卵');
-        else if (e.ready) session.showToast(breedCore.nurseryRoom(state) > 0 ? '正在落缸' : '培育缸满了，先腾位置');
+        if (!e) session.showToast('空位 · 去仓库鱼卵页点「孵化」占位');
+        else if (e.ready) session.showToast(breedCore.bagRoom(state) >= (e.twin ? 2 : 1) ? '正在进鱼篓' : '鱼篓满了，先卖几条');
         else session.showToast('还要 ' + e.left + ' 秒');
-        return;
-    }
-
-    /* 培育缸格子 → 子代详情 */
-    var slots = breedCore.nurserySlotsOf(state);
-    var list = state.nursery || [];
-    for (var c2 = 0; c2 < slots; c2++) {
-        if (!U.inRect(x, y, L.nurseryCellRect(c2))) continue;
-        if (list[c2]) session.nurseryDetail = list[c2].id;
-        else session.showToast('培育缸空着 · 孵出的子代会落在这里');
         return;
     }
 

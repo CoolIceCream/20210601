@@ -51,15 +51,14 @@ function create() {
         },
         caught: [],
 
-        /* ---- M12 繁育 ----
-         * hatchery  孵化槽队列：{ id, speciesId, sex, traits, motherId, fatherId,
-         *                        startAt, hatchAt, seconds, twin }
-         * nursery   培育缸：子代落点，结构与 fish 同构（含 traits / sex）
-         * nurseryLv 培育缸等级（1=普通，6 格）
-         * breedSeq  子代编号用的自增数 */
+        /* ---- M12 繁育 / M16 改造 ----
+         * eggs      仓库里的鱼卵：{ id, speciesId, sex, traits, motherId, fatherId,
+         *                          twin, bornAt }，没有倒计时，等玩家点「孵化」
+         * hatchery  培育栏位（正在孵化的蛋）：上面那些字段 + startAt / hatchAt / seconds
+         * breedSeq  子代编号用的自增数
+         * 老档的 nursery / nurseryLv 已在读档时并入鱼篓，不再保留 */
+        eggs: [],
         hatchery: [],
-        nursery: [],
-        nurseryLv: 1,
         breedSeq: 0,
 
         /* ---- 图鉴收录：曾经拥有过的鱼种（卖掉/被吃也算） ----

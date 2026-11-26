@@ -753,23 +753,19 @@ function propCells(state) {
     return out;
 }
 
-/* 鱼卵格：孵化槽在前，培育缸在后 */
+/* 鱼卵格：先「正在孵」的（培育栏位），再仓库里囤着的蛋。
+ * 空培育位不在这一页占格子 —— 那是繁育页的事，
+ * 摆一排空位只会把真正的鱼卵挤出首屏。 */
 function eggCells(state) {
-    var eggs = breed.hatchList(state);
-    var slots = cfg.breed.slots || 3;
-    var nursery = state.nursery || [];
-    var nSlots = breed.nurserySlotsOf(state);
     var out = [];
     var i;
-    for (i = 0; i < slots; i++) {
-        out.push(eggs[i]
-            ? { key: 'egg:' + i, kind: 'egg', egg: eggs[i] }
-            : { key: 'eggslot:' + i, kind: 'empty', label: '空孵化槽' });
+    var live = breed.hatchList(state);
+    for (i = 0; i < live.length; i++) {
+        out.push({ key: 'hatch:' + live[i].egg.id, kind: 'incubating', egg: live[i] });
     }
-    for (i = 0; i < nSlots; i++) {
-        out.push(nursery[i]
-            ? { key: 'nursery:' + i, kind: 'baby', fish: nursery[i] }
-            : { key: 'nurslot:' + i, kind: 'empty', label: '空培育位' });
+    var stored = breed.storedList(state);
+    for (i = 0; i < stored.length; i++) {
+        out.push({ key: 'egg:' + stored[i].egg.id, kind: 'egg', egg: stored[i] });
     }
     return out;
 }
@@ -782,12 +778,12 @@ function bagCellsOf(state, session) {
     return fishCells(state);
 }
 
-/* 当前子页能选的 key（全选按钮用） */
+/* 当前子页能选的 key（全选按钮用）。在孵的蛋不可选 —— 它已经在孵了 */
 function bagKeysOf(state, session) {
     var cells = bagCellsOf(state, session);
     var out = [];
     for (var i = 0; i < cells.length && out.length < L.BAG_GRID_CAP; i++) {
-        if (cells[i].kind === 'empty') continue;
+        if (cells[i].kind === 'empty' || cells[i].kind === 'incubating') continue;
         out.push(cells[i].key);
     }
     return out;
@@ -802,7 +798,21 @@ function bagActionsOf(state, session) {
     if (!sels.length) return [];
 
     if (tab === 0) {
-        return [{ key: 'breed', label: '去繁育看看', on: true, kind: 'green' }];
+        /* 选中的只可能是仓库鱼卵（在孵的蛋不进 sels），所以按钮就是「孵化」 */
+        var room = breed.hatchRoom(state);
+        if (sels.length === 1) {
+            return [{
+                key: 'hatch', label: '孵化',
+                sub: room > 0 ? '占 1 个培育位' : '培育位已满',
+                on: room > 0, kind: 'green'
+            }];
+        }
+        var k = Math.min(sels.length, room);
+        return [{
+            key: 'hatchMany', label: '批量孵化',
+            sub: k > 0 ? '孵 ' + k + ' 颗 · 空位 ' + room : '培育位已满',
+            on: k > 0, kind: 'green'
+        }];
     }
 
     if (tab === 1) {
@@ -1102,86 +1112,80 @@ function drawBagProps(ctx, state, ease, session) {
     }
 }
 
-/* ---------------- 子页三：鱼卵（孵化槽 + 培育缸） ---------------- */
+/* ---------------- 子页三：鱼卵（仓库囤着的 + 培育栏位里在孵的） ----------------
+ * M16：蛋不再自动孵。产卵后先进这一页，点「孵化」才占一个培育位，
+ * 到点鱼苗直接进鱼篓 —— 所以这一页既是仓库也是孵化台。 */
 
 function drawBagEggs(ctx, state, ease, session) {
-    var top = L.sheetTop(ease);
-    var eggs = breed.hatchList(state);
-    var slots = cfg.breed.slots || 3;
-    var nursery = state.nursery || [];
-    var nSlots = breed.nurserySlotsOf(state);
+    var live = breed.hatchList(state);
+    var slots = breed.hatchSlotsOf(state);
+    var stored = breed.storedList(state);
     var t = state.t || 0;
     var sels = session.bagSels || [];
 
     var cells = eggCells(state);
+    var storedN = stored.length;
 
-    var live = 0;
-    for (var c0 = 0; c0 < cells.length; c0++) {
-        if (cells[c0].kind !== 'empty') live += 1;
-    }
     drawBagHeader(ctx, session, ease,
-        '孵化 ' + eggs.length + '/' + slots + ' · 培育 ' + nursery.length + '/' + nSlots,
-        live, sels.length);
+        '鱼卵 ' + storedN + '/' + breed.eggCapOf(state) + ' · 在孵 ' + live.length + '/' + slots,
+        storedN, sels.length);
+
+    if (!cells.length) {
+        var er = L.bagCellRect(0, ease);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '600 11.5px sans-serif';
+        ctx.fillStyle = TT.textSoft;
+        ctx.fillText('还没有鱼卵 · 点右上「繁育」配一窝', W / 2, er.y + 42);
+        drawBagEmptyDetail(ctx, ease, '配好的蛋会放到这里，再点「孵化」才开始倒数');
+        return;
+    }
 
     for (var k = 0; k < L.BAG_GRID_CAP && k < cells.length; k++) {
         var r = L.bagCellRect(k, ease);
         var cell = cells[k];
+        var e = cell.egg;
         var sel = sels.indexOf(cell.key) >= 0;
 
-        if (cell.kind === 'empty') {
-            emptyCell(ctx, r);
-            ctx.textAlign = 'center';
+        if (cell.kind === 'incubating') {
+            /* 在孵：金边 + 进度条，一眼区分于"还在仓库里等着"的蛋 */
+            cellFrame(ctx, r, { sel: false, line: U.hexA(TT.gold, 0.5) });
+            breedRender.drawEgg(ctx, r.x + r.w / 2 - 12, r.y + 6, 24, 29, e.ready, e.twin, t);
+
+            ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.font = '600 9px sans-serif';
-            ctx.fillStyle = 'rgba(232,212,160,0.28)';
-            ctx.fillText(cell.label, r.x + r.w / 2, r.y + r.h / 2);
+            ctx.font = '800 9px sans-serif';
+            ctx.fillStyle = e.ready ? TT.goldLight : '#cfe0ef';
+            ctx.fillText(e.ready ? '可孵' : breedRender.clock(e.left), r.x + 5, r.y + r.h - 12);
+
+            ctx.textAlign = 'right';
+            ctx.font = '700 9px sans-serif';
+            ctx.fillStyle = TT.textSoft;
+            ctx.fillText('在孵', r.x + r.w - 5, r.y + r.h - 12);
+
+            roundRect(ctx, r.x + 5, r.y + r.h - 4, r.w - 10, 2.5, 1.25);
+            ctx.fillStyle = 'rgba(8,14,30,0.6)';
+            ctx.fill();
+            roundRect(ctx, r.x + 5, r.y + r.h - 4, Math.max(2, (r.w - 10) * e.progress), 2.5, 1.25);
+            ctx.fillStyle = e.ready ? TT.gold : '#6f9fc4';
+            ctx.fill();
             continue;
         }
 
-        if (cell.kind === 'egg') {
-            var e = cell.egg;
-            cellFrame(ctx, r, { sel: sel, line: U.hexA(e.ready ? TT.gold : '#6f9fc4', 0.55) });
+        /* 仓库里的蛋：选中后详情卡给「孵化」 */
+        cellFrame(ctx, r, { sel: sel, line: U.hexA(TT.goldLight, 0.45) });
+        breedRender.drawEgg(ctx, r.x + r.w / 2 - 12, r.y + 6, 24, 29, false, e.twin, t);
 
-            breedRender.drawEgg(ctx, r.x + r.w / 2 - 13, r.y + 8, 26, 32, e.ready, e.twin, t);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = '700 9px sans-serif';
+        ctx.fillStyle = TT.textSoft;
+        ctx.fillText('待孵', r.x + 5, r.y + r.h - 12);
 
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.font = '800 9.5px sans-serif';
-            ctx.fillStyle = e.ready ? TT.goldLight : TT.text;
-            ctx.fillText(e.ready ? '可孵' : breedRender.clock(e.left), r.x + 5, r.y + r.h - 13);
-
-            ctx.textAlign = 'right';
-            ctx.font = '700 9px sans-serif';
-            ctx.fillStyle = e.egg.sex === 'f' ? '#d2799f' : '#6b9ad0';
-            ctx.fillText(e.egg.sex === 'f' ? '♀' : '♂', r.x + r.w - 5, r.y + r.h - 13);
-
-            /* 孵化进度条：贴在格子最下沿 */
-            roundRect(ctx, r.x + 5, r.y + r.h - 5, r.w - 10, 3, 1.5);
-            ctx.fillStyle = 'rgba(8,14,30,0.6)';
-            ctx.fill();
-            roundRect(ctx, r.x + 5, r.y + r.h - 5, Math.max(2, (r.w - 10) * e.progress), 3, 1.5);
-            ctx.fillStyle = e.ready ? TT.gold : '#6f9fc4';
-            ctx.fill();
-        } else {
-            var bf = cell.fish;
-            var bsp = fishLib.speciesById(bf.speciesId);
-            cellFrame(ctx, r, { sel: sel, line: U.hexA(RARITY[bsp.rarity] || TT.gold, 0.5) });
-
-            art.drawThumb(ctx, bsp.id, r.x + 3, r.y + 3, r.w - 6, r.h - 26, {
-                t: t, evo: fishLib.evoOf(bf)
-            });
-
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'middle';
-            ctx.font = '700 9px sans-serif';
-            ctx.fillStyle = TT.textSoft;
-            ctx.fillText('育', r.x + 5, r.y + r.h - 13);
-
-            ctx.textAlign = 'right';
-            ctx.font = '800 9.5px sans-serif';
-            ctx.fillStyle = TT.goldLight;
-            ctx.fillText(Math.round(bf.growth) + '%', r.x + r.w - 5, r.y + r.h - 13);
-        }
+        ctx.textAlign = 'right';
+        ctx.font = '700 9px sans-serif';
+        ctx.fillStyle = e.egg.sex === 'f' ? '#d2799f' : '#6b9ad0';
+        ctx.fillText(e.egg.sex === 'f' ? '♀' : '♂', r.x + r.w - 5, r.y + r.h - 12);
 
         if (sel) selBadge(ctx, r, 0);
     }
@@ -1191,68 +1195,65 @@ function drawBagEggs(ctx, state, ease, session) {
         ctx.textBaseline = 'middle';
         ctx.font = '600 10px sans-serif';
         ctx.fillStyle = TT.textSoft;
-        ctx.fillText('还有 ' + (cells.length - L.BAG_GRID_CAP) + ' 个位置未显示',
+        ctx.fillText('还有 ' + (cells.length - L.BAG_GRID_CAP) + ' 颗未显示 · 孵掉几颗再看',
             W - 18, L.bagDetailRect(ease).y - 8);
     }
 
-    /* 详情卡 */
-    var pickIdx = -1;
+    /* ---- 详情卡 ---- */
+    var pick = null;
     for (var p = 0; p < cells.length; p++) {
-        if (sels.indexOf(cells[p].key) >= 0) { pickIdx = p; break; }
+        if (sels.indexOf(cells[p].key) >= 0) { pick = cells[p]; break; }
     }
-    if (pickIdx < 0) {
-        drawBagEmptyDetail(ctx, ease, '点蛋看词条与倒计时 · 右上「繁育」配新一窝');
+    if (!pick) {
+        drawBagEmptyDetail(ctx, ease, '点鱼卵 → 详情卡「孵化」 · 右上「繁育」配新一窝');
         return;
     }
 
-    var pick = cells[pickIdx];
-    if (pick.kind === 'egg') {
-        var eg = pick.egg;
-        var tags = [];
-        var trs = eg.traits || [];
-        for (var q = 0; q < trs.length && q < 3; q++) {
-            var def = fishLib.traitDef(trs[q].id);
-            if (def) tags.push({ txt: def.name + ' L' + fishLib.traitLvOf(trs[q]), color: TT.gold });
-        }
-        if (eg.twin) tags.unshift({ txt: '双生', color: '#c99ae8' });
+    var room = breed.hatchRoom(state);
 
+    if (sels.length > 1) {
         drawBagDetail(ctx, {
-            draw: function (c2, box) {
-                breedRender.drawEgg(ctx, box.x + box.w / 2 - 14, box.y + 7, 28, 34, eg.ready, eg.twin, t);
+            draw: function (c3, box) {
+                breedRender.drawEgg(ctx, box.x + box.w / 2 - 14, box.y + 7, 28, 34, false, false, t);
             },
-            name: eg.species.name + ' 的蛋',
-            sub: eg.egg.sex === 'f' ? '♀' : '♂',
-            subColor: eg.egg.sex === 'f' ? '#d2799f' : '#6b9ad0',
+            name: '已选 ' + sels.length + ' 颗蛋',
             price: '',
             desc: [
-                eg.ready ? '已经可以孵化，等培育缸腾出位置' : '还剩 ' + breedRender.clock(eg.left) + ' · 全程 ' + allClock(eg.egg.seconds),
-                eg.traits.length ? '带 ' + eg.traits.length + ' 条词条，孵出即成' : '没有词条，孵出是白板'
+                '空培育位 ' + room + ' 个 · 装不下的留在仓库',
+                '孵出的鱼苗直接进鱼篓'
             ],
-            tags: tags,
+            tags: [],
             buttons: bagActionsOf(state, session)
         }, ease);
         return;
     }
 
-    /* 培育缸里的子代 */
-    var nf = pick.fish;
-    var nsp = fishLib.speciesById(nf.speciesId);
+    var eg = pick.egg;
+    var tags = [];
+    var trs = eg.traits || [];
+    for (var q = 0; q < trs.length && q < 3; q++) {
+        var def = fishLib.traitDef(trs[q].id);
+        if (def) tags.push({ txt: def.name + ' L' + fishLib.traitLvOf(trs[q]), color: TT.gold });
+    }
+    if (eg.twin) tags.unshift({ txt: '双生', color: '#c99ae8' });
+
     drawBagDetail(ctx, {
         draw: function (c2, box) {
-            art.drawThumb(ctx, nsp.id, box.x, box.y, box.w, box.h, { t: t, evo: fishLib.evoOf(nf) });
+            breedRender.drawEgg(ctx, box.x + box.w / 2 - 14, box.y + 7, 28, 34, false, eg.twin, t);
         },
-        name: nsp.name,
-        sub: nf.sex === 'f' ? '♀' : '♂',
-        subColor: nf.sex === 'f' ? '#d2799f' : '#6b9ad0',
-        price: wallet.format(fishLib.sellPriceOf(nf, state.shellLv)),
+        name: eg.species.name + ' 的蛋',
+        sub: eg.egg.sex === 'f' ? '♀' : '♂',
+        subColor: eg.egg.sex === 'f' ? '#d2799f' : '#6b9ad0',
+        price: '',
         desc: [
-            '培育缸里的小鱼 · 成长 ' + Math.round(nf.growth) + '%',
-            '再大一点就能挪进鱼缸了'
+            '孵 ' + allClock(eg.seconds) + ' · 鱼苗直接进鱼篓',
+            eg.traits.length ? '带 ' + eg.traits.length + ' 条词条，孵出即成' : '没有词条，孵出是白板'
         ],
-        tags: [{ txt: '子代', color: '#c99ae8' }],
+        tags: tags,
         buttons: bagActionsOf(state, session)
     }, ease);
 }
+
 
 /* 仓库入口：子页签固定在最上面，内容按 session.bagTab 分发 */
 function drawBag(ctx, state, ease, session) {
@@ -1352,7 +1353,7 @@ function draw(ctx, state, session) {
         '传奇卵 10% 出金鲤鱼 · 带「龙鳞」可吞噬同族化龙',
         '点开任意一条鱼查看资料 · 卖掉也会保留收录',
         '钓上来的鱼先进仓库 · 放缸养大更值钱',
-        '点格子选中 · 详情卡里放缸或卖出 · 右上角进繁育'
+        '点格子选中 · 鱼卵可孵化 · 鱼可放缸或卖出 · 右上角进繁育'
     ];
     ctx.fillText(tips[session.sheetTab] || tips[0], W / 2, H - C.SAFE_BOTTOM - 12);
 

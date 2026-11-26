@@ -1,11 +1,17 @@
 /* ============================================================
- * core/breed.js · 繁育（M12）
+ * core/breed.js · 繁育（M12 / M16）
  *
  * 一句话规则：**雌方定种，雄方供词条，每个槽独立继承。**
  *   · 子代鱼种 = 雌鱼鱼种，性别 50/50
  *   · 词条按槽继承：母 40% / 父 40% / 全新 20%
  *   · 继承后等级会动：+1（25%，同种 33%，「亲缘」再加）、−1（8%）
- *   · 子代落点是培育缸（state.nursery），不进主缸也不进仓库
+ *
+ * 产物去哪儿（M16 改）：
+ *   配一次种 → 蛋进**仓库鱼卵**（state.eggs），不带倒计时，想囤就囤
+ *   在仓库点「孵化」 → 蛋进**培育栏位**（state.hatchery）开始倒数
+ *   到点 → 鱼苗直接进**鱼篓**（state.caught）
+ * 以前那颗「培育缸」是死胡同：鱼苗孵出来只能放缸或卖，
+ * 现在干脆去掉，孵出来跟钓上来的鱼走同一条路。
  *
  * 为什么成本按「雌方稀有度」：SSR 雌 + R 雄能出 SSR 鱼苗，
  * 若只收 30 金币鱼饵就是千倍套利，所以 SSR 收 2.5 万。
@@ -17,7 +23,6 @@ var cfg = require('../config/index.js');
 var platform = require('../platform.js');
 var fishLib = require('./fish.js');
 var wallet = require('./wallet.js');
-var storage = require('./storage.js');
 var codex = require('./codex.js');
 
 var B = cfg.breed;
@@ -32,18 +37,37 @@ function clamp(v, lo, hi) {
 
 /* ---------------- 容器 ---------------- */
 
-function nurserySlotsOf(state) {
-    var list = B.nurserySlots || [6];
-    var lv = clamp(Math.floor(state.nurseryLv || 1), 1, list.length);
+/** 培育栏位总数（繁育页里能同时孵几颗） */
+function hatchSlotsOf(state) {
+    var list = B.hatchSlots || [6];
+    var lv = clamp(Math.floor(state.hatchLv || 1), 1, list.length);
     return list[lv - 1];
 }
 
-function nurseryRoom(state) {
-    return Math.max(0, nurserySlotsOf(state) - ((state.nursery && state.nursery.length) || 0));
+function hatchRoom(state) {
+    return Math.max(0, hatchSlotsOf(state) - ((state.hatchery && state.hatchery.length) || 0));
 }
 
-function hatchRoom(state) {
-    return Math.max(0, B.slots - ((state.hatchery && state.hatchery.length) || 0));
+/** 仓库鱼卵上限：跟鱼篓一样「不小于当前数量」，老档不会被锁死 */
+function eggCapOf(state) {
+    var cap = B.eggCap || 24;
+    var n = (state.eggs || []).length;
+    return n > cap ? n : cap;
+}
+
+function eggRoom(state) {
+    return Math.max(0, eggCapOf(state) - ((state.eggs || []).length));
+}
+
+function eggFull(state) {
+    return eggRoom(state) <= 0;
+}
+
+/** 鱼篓还能装几条：孵出的鱼苗落这里，跟钓到的鱼同一个容器 */
+function bagRoom(state) {
+    var cap = (cfg.economy && cfg.economy.bagCap) || 20;
+    var n = (state.caught || []).length;
+    return Math.max(0, (n > cap ? n : cap) - n);
 }
 
 /** 主缸 + 仓库里能当亲本的鱼（成鱼、非捕食者） */
@@ -97,6 +121,36 @@ function candidatesOf(state) {
     return out;
 }
 
+/* ---------------- 鱼卵读写 ---------------- */
+
+function findEggIndex(state, id) {
+    var list = state.eggs || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return i;
+    return -1;
+}
+
+function findEgg(state, id) {
+    var i = findEggIndex(state, id);
+    return i < 0 ? null : state.eggs[i];
+}
+
+/** 仓库鱼卵列表：渲染和计数都用它，别在别处再抄一遍字段 */
+function storedList(state) {
+    var list = state.eggs || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        out.push({
+            egg: e,
+            species: fishLib.speciesById(e.speciesId),
+            traits: e.traits || [],
+            twin: !!e.twin,
+            seconds: e.seconds || B.hatchSeconds || 180
+        });
+    }
+    return out;
+}
+
 /* ---------------- 成本与时长 ---------------- */
 
 function costOf(mother) {
@@ -110,7 +164,8 @@ function costOf(mother) {
     };
 }
 
-/** 孵化时长：受雌鱼「速繁」缩短，最低保留 hatchFloor */
+/** 孵化时长：受雌鱼「速繁」缩短，最低保留 hatchFloor。
+ *  蛋里存下来，之后亲本卖掉也不影响这颗蛋的时长。 */
 function hatchSecondsOf(mother) {
     var fast = fishLib.traitEffect(mother, 'hatch');
     var mul = Math.max(B.hatchFloor || 0.4, 1 - fast / 100);
@@ -225,8 +280,7 @@ function canBreed(state, motherId, fatherId) {
     if (fatigueLeft(m, now) > 0) return fail('fatigue', '雌鱼还在疲劳，' + fatigueLeft(m, now) + ' 秒后可再繁育');
     if (fatigueLeft(f, now) > 0) return fail('fatigue', '雄鱼还在疲劳，' + fatigueLeft(f, now) + ' 秒后可再繁育');
 
-    if (hatchRoom(state) <= 0) return fail('slots', '孵化槽满了，等一颗蛋孵出来');
-    if (nurseryRoom(state) <= 0) return fail('nursery', '培育缸满了，先腾出格子');
+    if (eggFull(state)) return fail('eggs', '鱼卵仓库满了（' + eggCapOf(state) + ' 颗），先去孵几颗');
 
     var cost = costOf(m);
     if (!wallet.canAfford(state, 'fish', cost.coin)) {
@@ -248,10 +302,11 @@ function canBreed(state, motherId, fatherId) {
     };
 }
 
-/* ---------------- 执行 ---------------- */
+/* ---------------- 执行：配种 ---------------- */
 
 var seq = 0;
 
+/** 配一次种：扣钱扣饵扣饱食，蛋直接进**仓库**，不进培育栏位 */
 function breed(state, motherId, fatherId) {
     var chk = canBreed(state, motherId, fatherId);
     if (!chk.ok) return chk;
@@ -276,18 +331,18 @@ function breed(state, motherId, fatherId) {
     seq += 1;
 
     var egg = {
-        id: 'h' + now.toString(36) + '_' + seq,
+        id: 'g' + now.toString(36) + '_' + seq,
         speciesId: chk.species.id,
         sex: Math.random() < 0.5 ? 'm' : 'f',
         traits: traits,
         motherId: m.id,
         fatherId: f.id,
-        startAt: now,
-        hatchAt: now + chk.seconds * 1000,
+        twin: twin,
+        /* 时长在产卵时定，孵化时直接用 —— 亲本卖掉也不影响 */
         seconds: chk.seconds,
-        twin: twin
+        bornAt: now
     };
-    state.hatchery.push(egg);
+    state.eggs.push(egg);
 
     return {
         ok: true,
@@ -295,11 +350,56 @@ function breed(state, motherId, fatherId) {
         cost: chk.cost,
         seconds: chk.seconds,
         twin: twin,
-        traits: traits
+        traits: traits,
+        stored: state.eggs.length
     };
 }
 
-/* ---------------- 孵化 ---------------- */
+/* ---------------- 执行：孵化 ---------------- */
+
+/**
+ * 把仓库里的蛋放进培育栏位开始倒数（单颗 / 批量共用）。
+ * 栏位满了就只孵得下的那几颗，剩下的留在仓库，不报错也不吞蛋。
+ */
+function hatchEggs(state, ids) {
+    if (!ids || !ids.length) return { ok: false, reason: 'empty', count: 0 };
+    var room = hatchRoom(state);
+    if (room <= 0) return { ok: false, reason: 'slots', count: 0, room: 0 };
+
+    var now = nowMs();
+    var moved = 0;
+    var last = null;
+
+    for (var i = 0; i < ids.length && moved < room; i++) {
+        var idx = findEggIndex(state, ids[i]);
+        if (idx < 0) continue;
+        var egg = state.eggs.splice(idx, 1)[0];
+        var seconds = Math.max(10, Math.round(egg.seconds || B.hatchSeconds || 180));
+
+        egg.startAt = now;
+        egg.hatchAt = now + seconds * 1000;
+        egg.seconds = seconds;
+        state.hatchery.push(egg);
+        last = egg;
+        moved += 1;
+    }
+
+    if (!moved) return { ok: false, reason: 'gone', count: 0, room: room };
+    return {
+        ok: true,
+        count: moved,
+        room: room - moved,
+        blocked: Math.max(0, ids.length - moved),
+        seconds: last.seconds,
+        egg: last
+    };
+}
+
+function hatchEgg(state, eggId) {
+    return hatchEggs(state, [eggId]);
+}
+
+/* ---------------- 孵化进度 ---------------- */
 
 function hatchList(state, now) {
     var t = now == null ? nowMs() : now;
@@ -323,8 +423,8 @@ function hatchList(state, now) {
 }
 
 /**
- * 推进孵化：到点且培育缸还有空间才落缸。
- * 培育缸满了就先留在槽里（不丢、不重复扣费），UI 会显示「培育缸已满」。
+ * 推进孵化：到点且鱼篓还有位置才落篓。
+ * 鱼篓满了就先留在栏位里等（不丢、不重复计时），UI 会提示「鱼篓满了」。
  * 返回本帧新孵出的鱼，供飘字 / 提示使用。
  */
 function tick(state, now) {
@@ -335,7 +435,7 @@ function tick(state, now) {
         var h = list[i];
         if (t < h.hatchAt) continue;
         var need = h.twin ? 2 : 1;
-        if (nurseryRoom(state) < need) continue;   /* 等玩家腾位置 */
+        if (bagRoom(state) < need) continue;   /* 等玩家腾鱼篓 */
 
         for (var k = 0; k < need; k++) {
             var baby = fishLib.create(h.speciesId, {
@@ -345,7 +445,10 @@ function tick(state, now) {
                 hunger: 86,
                 mood: 90
             });
-            state.nursery.push(baby);
+            baby.tank = 0;
+            baby.x = 0;
+            baby.y = 0;
+            state.caught.push(baby);
             codex.mark(state, baby.speciesId);   /* 繁育产出的新鱼种也算收录 */
             born.push(baby);
         }
@@ -354,77 +457,16 @@ function tick(state, now) {
     return born;
 }
 
-/** 培育缸里的鱼也要长大：普通成长曲线，但不进主缸的运行时模拟 */
-function growNursery(state, dt) {
-    var list = state.nursery || [];
-    if (!dt || dt <= 0) return;
-    for (var i = 0; i < list.length; i++) {
-        var f = list[i];
-        if (f.growth < 100) {
-            var pg = fishLib.passiveGrowthPerSecond(f);
-            if (pg > 0) f.growth = Math.min(100, f.growth + pg * dt);
-        }
-        /* 饱食度缓慢下降，但不至于饿死：培育缸是观察区，不是主缸 */
-        var feedMul = Math.max(0.45, 1 - fishLib.traitEffect(f, 'feed') / 100);
-        f.hunger = Math.max(0, (f.hunger || 0) - cfg.economy.feeding.hungerDecay * feedMul * dt * 0.6);
-    }
-}
-
-/* ---------------- 培育缸操作 ---------------- */
-
-function nurseryList(state) {
-    var out = [];
-    var list = state.nursery || [];
-    for (var i = 0; i < list.length; i++) {
-        var f = list[i];
-        out.push({
-            fish: f,
-            species: fishLib.speciesById(f.speciesId),
-            price: fishLib.sellPriceOf(f, state.shellLv),
-            stage: fishLib.stageName(fishLib.stageOf(f.growth)),
-            growth: Math.round(f.growth)
-        });
-    }
-    return out;
-}
-
-function moveToTank(state, fishId) {
-    var list = state.nursery || [];
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== fishId) continue;
-        if (storage.roomOf(state) <= 0) return { ok: false, reason: 'full' };
-        var f = list.splice(i, 1)[0];
-        f.tank = storage.activeTankOf(state);
-        f.x = 0;
-        f.y = 0;
-        state.fish.push(f);
-        return { ok: true, fish: f };
-    }
-    return { ok: false, reason: 'missing' };
-}
-
-function sellNursery(state, fishId) {
-    var list = state.nursery || [];
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id !== fishId) continue;
-        var f = list[i];
-        var price = fishLib.sellPriceOf(f, state.shellLv);
-        list.splice(i, 1);
-        wallet.add(state, 'fish', price, 'sell');
-        return { ok: true, price: price, name: fishLib.speciesById(f.speciesId).name };
-    }
-    return { ok: false, reason: 'missing' };
-}
-
 /* 繁育页头部要的全部读数 */
 function statusOf(state) {
     var now = nowMs();
     return {
-        hatchSlots: B.slots,
+        hatchSlots: hatchSlotsOf(state),
         hatchUsed: (state.hatchery || []).length,
-        nurserySlots: nurserySlotsOf(state),
-        nurseryUsed: (state.nursery || []).length,
-        nurseryRoom: nurseryRoom(state),
+        hatchRoom: hatchRoom(state),
+        eggCap: eggCapOf(state),
+        eggCount: (state.eggs || []).length,
+        stored: storedList(state),
         candidates: candidatesOf(state),
         eggs: hatchList(state, now),
         bait: (state.bag && state.bag.bait) || 0
@@ -436,20 +478,24 @@ module.exports = {
     twinChanceOf: twinChanceOf,
     costOf: costOf,
     fatigueLeft: fatigueLeft,
-    nurserySlotsOf: nurserySlotsOf,
-    nurseryRoom: nurseryRoom,
+    hatchSlotsOf: hatchSlotsOf,
     hatchRoom: hatchRoom,
+    eggCapOf: eggCapOf,
+    eggRoom: eggRoom,
+    eggFull: eggFull,
+    bagRoom: bagRoom,
     candidatesOf: candidatesOf,
     findFish: findFish,
     zoneOf: zoneOf,
+    findEgg: findEgg,
+    findEggIndex: findEggIndex,
+    storedList: storedList,
     inheritTraits: inheritTraits,
     canBreed: canBreed,
     breed: breed,
+    hatchEgg: hatchEgg,
+    hatchEggs: hatchEggs,
     hatchList: hatchList,
     tick: tick,
-    growNursery: growNursery,
-    nurseryList: nurseryList,
-    moveToTank: moveToTank,
-    sellNursery: sellNursery,
     statusOf: statusOf
 };
